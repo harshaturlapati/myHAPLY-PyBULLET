@@ -1,0 +1,29 @@
+# Terminal behind the lab page's "Terminal" tab. Shells run as the restricted 'student' user.
+# Installed by lab/setup_pi.sh. @REPO@ is filled in by the setup script.
+[Unit]
+Description=Haply lab console terminal (shells as the restricted 'student' user, 127.0.0.1:8781)
+After=network.target
+
+[Service]
+User=student
+Group=student
+WorkingDirectory=/home/student
+ExecStart=/usr/bin/python3 @REPO@/lab/haply_term.py --port 8781
+Restart=always
+RestartSec=3
+
+# Sandbox. 'student' has no sudo and is only in group dialout (for /dev/haply). On top of that:
+NoNewPrivileges=yes
+# no CAN sockets (the Piper arms) and no raw/netlink sockets: only local, IPv4 and IPv6
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+# keep heavy builds from starving the haptic engine (which also runs at real-time priority on its own core)
+CPUQuota=200%
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target

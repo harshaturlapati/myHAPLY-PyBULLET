@@ -1,0 +1,21 @@
+name: Equation proposal
+description: Propose a new haptic behaviour (the console's Equation lab fills this in for you)
+labels: [equation-proposal]
+body:
+  - type: textarea
+    id: feel
+    attributes:
+      label: What should it feel like, and what is it for?
+    validations:
+      required: true
+  - type: textarea
+    id: equations
+    attributes:
+      label: Equations
+      description: As typed in the Equation lab (Fx, Fy, Fz), and in LaTeX if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: params
+    attributes:
+      label: Parameters you tried, and what you observed

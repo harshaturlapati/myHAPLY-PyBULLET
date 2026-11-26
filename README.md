@@ -5,9 +5,10 @@ Sibling of [myVIRTUOSE-PyBULLET](https://github.com/harshaturlapati/myVIRTUOSE-P
 "one numbered `.cpp` = one executable" convention, same device-object style (`quick_start()`, `getPOS()`,
 `render_F_cmd()`, `quick_stop()`), but every line builds on both operating systems.
 
-**Student guide (interactive):** <https://harshaturlapati.github.io/myHAPLY-PyBULLET/> (the same page is
-[`docs/index.html`](docs/index.html), which also works offline). It has setup steps for each OS, a viewer
-for the CSV logs the examples write, and the fork → branch → pull-request workflow.
+**Haply lab console:** a web page to play with the device, learn the equations of haptic interaction, record and
+analyse experiments, read the C++ that runs it, write a report, and send feedback, without coding first.
+- In the lab: served by the Pi at `http://<pi>:8780/?key=…` (live device, terminal, lab TV). See [`lab/README.md`](lab/README.md).
+- Anywhere: <https://harshaturlapati.github.io/myHAPLY-PyBULLET/> runs the same page with a built-in simulator.
 
 ## How the code talks to the Haply
 The Inverse3 is a USB serial device (CDC-ACM, USB id `16c0:0483`). [`libs/myHAPLY_v1.h`](libs/myHAPLY_v1.h)
@@ -53,9 +54,12 @@ libs/myHAPLY_LOGGING.h             preallocated logger, CSV writer (like myVIRTU
 libs/myINCLUDES.h                  portable includes, 1 kHz timing, press-Q-to-quit
 libs/Eigen, libs/myGEOMETRY        linear algebra + rotation helpers (for the PyBullet examples)
 src/                               Bullet shared-memory client -> library "pybullet_cpp"
+libs/myHAPLY_SCENARIOS.h           the haptic equations (impedance, fixtures, wall, custom) written with Eigen
+libs/myEXPR.h                      safe compiler for student-typed force equations
+lab/                               lab console: real-time engine (C++), web server + terminal (Python), Pi setup
+docs/                              the console web page (also GitHub Pages), lessons in docs/learn/
 cmake/HaplyHardwareAPI.cmake       optional: Haply's legacy library (off by default)
 scripts/build_windows.ps1          one-command build on Windows
-docs/index.html                    student guide + log viewer
 ```
 
 ## Build

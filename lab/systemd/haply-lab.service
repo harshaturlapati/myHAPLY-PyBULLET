@@ -1,0 +1,20 @@
+# Haply lab console: real-time C++ engine + web server (port 8780). Installed by lab/setup_pi.sh.
+# @ADMIN@ and @REPO@ are filled in by the setup script.
+[Unit]
+Description=Haply lab console (C++ haptic engine + web page on port 8780)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=@ADMIN@
+WorkingDirectory=@REPO@
+ExecStart=/usr/bin/python3 @REPO@/lab/haply_lab.py --port 8780
+Restart=always
+RestartSec=3
+# Let the engine ask for real-time priority (SCHED_FIFO 40) and lock its memory; it pins itself to the last CPU.
+# The Python web server itself keeps normal priority.
+LimitRTPRIO=60
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=multi-user.target

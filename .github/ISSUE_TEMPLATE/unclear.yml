@@ -1,0 +1,22 @@
+name: Something was unclear
+description: A lesson, a line of code or a step in the lab console did not make sense
+labels: [feedback]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Where?
+      description: Lesson name, console tab, or file:line (e.g. libs/myHAPLY_SCENARIOS.h:67)
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What was confusing?
+      description: Quote the sentence or line, and say what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: How would you explain it? (optional)

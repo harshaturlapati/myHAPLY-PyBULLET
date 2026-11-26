@@ -1,0 +1,18 @@
+name: Documentation fix
+description: Something in a lesson or README is wrong, missing or could be clearer
+labels: [documentation]
+body:
+  - type: input
+    id: file
+    attributes:
+      label: Which page?
+      description: e.g. docs/learn/04-impedance-control.md
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: What should change?
+      description: You can also edit the file directly on GitHub and open a pull request ("Improve this lesson on GitHub" in the console).
+    validations:
+      required: true
