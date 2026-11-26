@@ -6,7 +6,7 @@ loop; this server only
   * starts the engine and relays its ~100 Hz state to browsers (Server-Sent Events, ~30 Hz per page),
   * passes the controlling student's commands to the engine (UDP on 127.0.0.1),
   * keeps one student in control at a time, and sends the engine a heartbeat only while that student's
-    page is alive (if the page dies, the engine's watchdog switches forces off within 1 s),
+    page is alive (if the page dies, the engine's watchdog switches forces off within 2 s),
   * lists and serves recordings, serves source files read-only for the code explorer, stores feedback,
   * relays the in-page terminal to lab/haply_term.py (which runs as the restricted 'student' user),
   * serves the web app itself (the repository's docs/ folder, the same files as GitHub Pages).
@@ -47,7 +47,7 @@ SOURCE_EXT = (".h", ".hpp", ".cpp", ".py", ".md", ".txt", ".cmake", ".js")
 
 CONTROL_LEASE_S = 3.0      # controller must ping at least this often or loses control
 HB_PERIOD_S = 0.2          # heartbeat to the engine while the controller is alive
-HB_ALIVE_S = 1.0           # controller ping younger than this -> heartbeat is sent
+HB_ALIVE_S = 0.8           # controller ping younger than this -> heartbeat is sent (pages ping every 0.4 s)
 
 FLOAT = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
 CMD_PATTERNS = [

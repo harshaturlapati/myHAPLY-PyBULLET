@@ -571,7 +571,7 @@ async function toggleForces() {
     if (!app._forceConfirmed) {
       const boxes = ["The motor power cable is plugged in (feedback works without it; forces need it).",
         "I am holding the handle firmly.", "Nobody's face or fingers are near the arms.",
-        "I know: the red button on this page (or closing the page) switches forces off within 1 s."].map(t => h("label", {}, h("input", { type: "checkbox" }), h("span", { text: t })));
+        "I know: the red button on this page (or closing the page) switches forces off within 2 s."].map(t => h("label", {}, h("input", { type: "checkbox" }), h("span", { text: t })));
       const body = h("div", {}, ...boxes);
       const ok = await modal("Before forces go on", body, [{ label: "Cancel", value: false },
         { label: "Switch forces on", cls: "primary", value: true, check: () => { const all = $$("input", body).every(c => c.checked); if (!all) toast("Tick all four boxes first.", "bad"); return all; } }]);
@@ -740,7 +740,7 @@ function renderReadout(s) {
   btn.disabled = !inControl();
   $("#force-note").textContent = !inControl() ? "Take control (top right) to change anything. You can still watch." :
     live() && !s.sim && !s.cal ? "The device is not calibrated: forces cannot go on." :
-    s.on ? `Force limit ${fmt((s.par || {}).fmax || P.fmax, 1)} N. Closing this page also switches forces off within 1 s.` :
+    s.on ? `Force limit ${fmt((s.par || {}).fmax || P.fmax, 1)} N. Closing this page also switches forces off within 2 s.` :
     "Forces fade in over 1 s. Start with small k (100–200 N/m).";
   $("#drag-hint").textContent = live() && !s.sim ? "Move the real handle." : "Drag in a view to move the virtual hand.";
   $("#scale-top").textContent = $("#scale-side").textContent = `±${Math.round(viewState.half * 100)} cm`;

@@ -174,6 +174,7 @@ public:
                 t_retry = now + std::chrono::seconds(2);
                 haply_.port = port;
                 haply_.timeout_ms = 20;
+                haply_.F_max = (float)FMAX_HARD;   // the engine's own clamp (fmax <= 4 N) is the one that counts
                 if (haply_.connect()) { connected_ = true; set_msg("Inverse3 connected on " + haply_.port); }
             }
 

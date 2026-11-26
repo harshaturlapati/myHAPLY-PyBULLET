@@ -23,7 +23,7 @@ the engine at the full rate.
 - Forces **fade in** over 1 s; `|F|` is clamped to the page's limit (hard cap 4 N); `k ≤ 1000 N/m`, `b ≤ 15 N·s/m`;
   the target point moves at most 0.1 m/s and `k`, `b` change gradually, so a slider never makes the handle jump.
 - **Watchdog:** the server sends a heartbeat only while the controlling page is alive. If the page closes, crashes or
-  goes to the background, forces are off within 1 s.
+  goes to the background, forces are off within 2 s (usually about 1 s).
 - **Speed guard:** forces switch off if the cursor moves faster than 1.5 m/s (instability shows up as speed first).
 - **One driver at a time** (control lock); everybody else can watch.
 - **Physical interlock:** forces need the motor power cable. Without it the device still streams its position.
