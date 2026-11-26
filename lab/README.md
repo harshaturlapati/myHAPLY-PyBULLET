@@ -6,7 +6,7 @@ experiments, read the C++ that runs the device, and turn it all into a report, w
 ```
  browser (any laptop on the lab Wi-Fi)                      lab Raspberry Pi
  ┌─────────────────────────────┐   HTTP / SSE   ┌───────────────────────────┐  UDP 127.0.0.1  ┌──────────────────────────┐   USB
- │ docs/index.html + app.js    │ ─────────────► │ lab/haply_lab.py (Python) │ ──────────────► │ build/haply_lab_engine   │ ────► Inverse3
+ │ docs/index.html + app_v2.js │ ─────────────► │ lab/haply_lab.py (Python) │ ──────────────► │ build/haply_lab_engine   │ ────► Inverse3
  │ Play, Learn, Code, Report…  │ ◄───────────── │ control lock, recordings, │ ◄────────────── │ 1 kHz loop, equations,   │ ◄────
  └─────────────────────────────┘   ~30 Hz       │ code browser, feedback    │   100 Hz state  │ safety layers (C++)      │
                │  WebSocket                     └───────────────────────────┘                 └──────────────────────────┘
@@ -98,4 +98,4 @@ server behind it, it runs its own JavaScript simulator: students can learn and p
 | `haply_lab.py` | web server: page, live stream, control lock, recordings, source browser, feedback, LabTV |
 | `haply_term.py` | WebSocket ⇄ pseudo-terminal for the Terminal tab |
 | `systemd/*.service`, `setup_pi.sh` | install on the Pi |
-| `../docs/` | the page itself (`index.html`, `app.js`, `app.css`), lessons (`learn/`), browser libraries (`vendor/`) |
+| `../docs/` | the page itself (`index.html`, `app_v2.js` (older versions such as `app.js` are kept), `app.css`), lessons (`learn/`), browser libraries (`vendor/`) |

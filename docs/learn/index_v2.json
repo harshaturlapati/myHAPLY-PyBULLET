@@ -1,0 +1,11 @@
+[
+  {"file": "00-start-here.md", "title": "Start here: meet the Inverse3", "minutes": 15, "summary": "The device and its parts, safety rules, calibration after every power-up, and a tour of the console tabs."},
+  {"file": "01-frames-and-units.md", "title": "Frames, units and the 1 kHz loop", "minutes": 20, "summary": "Position (m), velocity (m/s), force (N), the device frame, one 1 ms cycle, how 01_read_fbk.cpp reads data, and the CSV columns."},
+  {"file": "02-rotations.md", "title": "Rotations", "minutes": 25, "summary": "Rotation matrices, roll-pitch-yaw with Eigen AngleAxisd, and R v versus R^T v, with a yaw = 90 degree worked example."},
+  {"file": "03-rigid-body-motion.md", "title": "Rigid-body motion: poses and transforms", "minutes": 25, "summary": "Homogeneous transforms in SE(3), points versus directions, compose() in mySE3.h, and the target frame as a pose."},
+  {"file": "04-impedance-control.md", "title": "Impedance control: springs and dampers", "minutes": 30, "summary": "F = k(x_d - x) - b v with numbers you can feel, the exact code, and how to measure k from a recording."},
+  {"file": "05-virtual-fixtures.md", "title": "Virtual fixtures: guides and walls", "minutes": 30, "summary": "Line and plane guides, damping fields, rotated guides, and the wall as a one-sided spring with max(0, ...)."},
+  {"file": "06-stability-and-safety_v2.md", "title": "Stability and safety", "minutes": 25, "summary": "When a sampled virtual wall can buzz (and why ours at 1 kHz most likely will not), how the force limit flattens a wall, why forces fade in, and every safety layer of the engine with its message."},
+  {"file": "07-your-own-equation.md", "title": "Your own equation: the Equation lab", "minutes": 35, "summary": "The variables and functions you may type, six worked equations to feel, how they run in C++, and how to propose one."},
+  {"file": "08-writing-the-report.md", "title": "Writing the report", "minutes": 20, "summary": "Report structure, what the Report tab fills in, how to cite exact code lines, and a checklist before you hand in."}
+]

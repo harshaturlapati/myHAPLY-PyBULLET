@@ -14,7 +14,7 @@ Students are the main contributors here: every lesson, explanation and example c
 1. Fork, clone your fork, add `upstream` (see the console's *Build it yourself* tab).
 2. Branch: `git checkout -b 02-virtual-wall upstream/main`.
 3. New example: `NNN-Topic/NN_short_name.cpp` (CMake finds it). New haptic behaviour: a new `case` in
-   `libs/myHAPLY_SCENARIOS.h`, plus its twin in `docs/app.js` (`forceOf`) so the simulator matches.
+   `libs/myHAPLY_SCENARIOS.h`, plus its twin in `docs/app_v2.js` (`forceOf`; the newest `docs/app_vN.js` is the one `docs/index.html` loads) so the simulator matches.
 4. Build on at least one OS, run it on the device or in the simulator, open a pull request and say what you tested.
 
 Rules: forces stay under `F_max` and are zero on exit; device code lives in `libs/`; never commit `build/`, logs,
