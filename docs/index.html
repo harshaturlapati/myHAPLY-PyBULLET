@@ -1,0 +1,736 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>myHAPLY-PyBULLET · student lab guide</title>
+<meta name="description" content="Set up, run and extend the Haply Inverse3 + PyBullet C++ examples on Windows and Raspberry Pi, view your logs, and contribute through forks.">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --surface-2: #f3f2ef;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11,11,11,0.10);
+  --accent: #2a78d6;
+  --accent-ink: #1c5cab;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --status-good: #0ca30c;
+  --status-good-ink: #006300;
+  --status-warning: #fab219;
+  --status-critical: #d03b3b;
+  --code-bg: #f3f2ef;
+  --radius: 10px;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --surface-2: #232321;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --accent: #3987e5;
+    --accent-ink: #86b6ef;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --status-good-ink: #0ca30c;
+    --code-bg: #232321;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--text-primary); line-height: 1.55; font-size: 16px; }
+a { color: var(--accent-ink); }
+header.top { border-bottom: 1px solid var(--border); background: var(--surface-1); }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+header.top .wrap { padding-top: 28px; padding-bottom: 18px; }
+h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.01em; }
+.lede { color: var(--text-secondary); margin: 0 0 14px; max-width: 760px; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; }
+nav.toc a { text-decoration: none; color: var(--text-secondary); }
+nav.toc a:hover { color: var(--text-primary); text-decoration: underline; }
+section { padding: 30px 0 8px; }
+h2 { font-size: 21px; margin: 0 0 4px; }
+h3 { font-size: 16px; margin: 22px 0 6px; }
+.sub { color: var(--text-secondary); margin: 0 0 16px; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; margin: 12px 0; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+label.field { display: flex; flex-direction: column; font-size: 13px; color: var(--text-secondary); gap: 4px; }
+input[type=text], input[type=number], select {
+  font: inherit; font-size: 14px; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--axis);
+  background: var(--surface-1); color: var(--text-primary); min-width: 0;
+}
+input[type=number] { width: 110px; }
+.seg { display: inline-flex; border: 1px solid var(--axis); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; font-size: 14px; border: 0; background: transparent; color: var(--text-secondary); padding: 7px 14px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--axis); }
+.seg button[aria-pressed=true] { background: var(--accent); color: #fff; }
+.btn { display: inline-block; font: inherit; font-size: 14px; line-height: 1.4; border-radius: 8px; border: 1px solid var(--axis); background: var(--surface-1); color: var(--text-primary); padding: 7px 14px; cursor: pointer; }
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+.btn.primary:hover { background: var(--accent-ink); }
+a.btn { display: inline-block; text-decoration: none; font-size: 14px; border-radius: 8px; padding: 7px 14px; background: var(--accent); color: #fff; }
+a.btn:hover { background: var(--accent-ink); }
+ol.steps { padding-left: 22px; margin: 8px 0; }
+ol.steps > li { margin: 10px 0 14px; }
+.code { position: relative; margin: 6px 0; }
+.code pre { margin: 0; background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 84px 10px 12px; overflow-x: auto; font-size: 13.5px; line-height: 1.5; }
+.code pre, code { font-family: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; }
+code { background: var(--code-bg); border-radius: 4px; padding: 1px 4px; font-size: 0.92em; }
+.code .copy { position: absolute; top: 6px; right: 6px; font-size: 12px; padding: 4px 10px; }
+.note { font-size: 14px; color: var(--text-secondary); }
+.check { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.check:last-child { border-bottom: 0; }
+.check input { margin-top: 5px; width: 17px; height: 17px; accent-color: var(--accent); flex: none; }
+.check span b { font-weight: 600; }
+.status { display: flex; gap: 10px; align-items: flex-start; border-radius: 8px; padding: 10px 12px; font-size: 14px; border: 1px solid var(--border); background: var(--surface-2); margin: 10px 0; }
+.status svg { flex: none; margin-top: 2px; }
+.status.warn svg { color: var(--status-warning); }
+.status.good svg { color: var(--status-good); }
+.status.bad svg { color: var(--status-critical); }
+.drop { border: 1.5px dashed var(--axis); border-radius: var(--radius); padding: 22px; text-align: center; color: var(--text-secondary); background: var(--surface-1); }
+.drop.over { border-color: var(--accent); background: var(--surface-2); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 14px 0; }
+.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+.tile .k { font-size: 12.5px; color: var(--text-secondary); }
+.tile .v { font-size: 22px; font-weight: 600; margin-top: 2px; }
+.tile .s { font-size: 12.5px; color: var(--text-muted); }
+.chart { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px 10px; margin: 12px 0; position: relative; }
+.chart h4 { margin: 0; font-size: 15px; }
+.chart .cap { margin: 0 0 6px; font-size: 13px; color: var(--text-secondary); }
+.legend { display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary); margin: 4px 0 2px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 16px; height: 2px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart svg text { font-size: 11.5px; fill: var(--text-muted); font-variant-numeric: tabular-nums; }
+.chart svg text.dl { font-size: 12px; fill: var(--text-secondary); }
+.tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; box-shadow: 0 4px 14px rgba(0,0,0,0.12); min-width: 140px; display: none; z-index: 2; }
+.tip .t { color: var(--text-secondary); margin-bottom: 4px; }
+.tip .r { display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.tip .r b { color: var(--text-primary); font-weight: 600; min-width: 70px; }
+.tip .r i { width: 12px; height: 2px; border-radius: 2px; display: inline-block; }
+.tip .r span { color: var(--text-secondary); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+table.data { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+table.data th, table.data td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.data th { color: var(--text-secondary); font-weight: 600; font-size: 12.5px; }
+table.num td { font-variant-numeric: tabular-nums; }
+.pill { font-size: 12px; border-radius: 99px; padding: 1px 9px; border: 1px solid var(--border); white-space: nowrap; }
+.pill.done { color: var(--status-good-ink); }
+.pill.todo { color: var(--text-secondary); }
+.hidden { display: none !important; }
+footer { color: var(--text-muted); font-size: 13px; padding: 30px 0 40px; }
+details > summary { cursor: pointer; color: var(--text-secondary); font-size: 14px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <h1>myHAPLY-PyBULLET</h1>
+    <p class="lede">Read the Haply Inverse3 at 1 kHz from C++, on Windows or the lab Raspberry Pi, and build haptics
+      on top of PyBullet. This page walks you from a fresh fork to your first log, and on to your own pull request.</p>
+    <nav class="toc" aria-label="Sections">
+      <a href="#setup">1 · Set up</a>
+      <a href="#device">2 · Prepare the device</a>
+      <a href="#run">3 · Run</a>
+      <a href="#logs">4 · Look at your data</a>
+      <a href="#examples">5 · Examples</a>
+      <a href="#contribute">6 · Contribute</a>
+      <a href="#protocol">Protocol</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+<!-- ======================================================================= SETUP -->
+<section id="setup">
+  <h2>1 · Set up</h2>
+  <p class="sub">Pick your computer and type your GitHub username: every command below is written for your fork.</p>
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="note" style="margin-bottom:4px">Your computer</div>
+        <div class="seg" role="group" aria-label="Operating system">
+          <button type="button" data-os="win" aria-pressed="true">Windows</button>
+          <button type="button" data-os="pi" aria-pressed="false">Raspberry Pi / Linux</button>
+          <button type="button" data-os="mac" aria-pressed="false">macOS</button>
+        </div>
+      </div>
+      <label class="field">GitHub username
+        <input type="text" id="gh-user" placeholder="your-username" autocomplete="off" spellcheck="false">
+      </label>
+      <a class="btn" href="https://github.com/harshaturlapati/myHAPLY-PyBULLET/fork" target="_blank" rel="noopener">Fork on GitHub</a>
+    </div>
+    <ol class="steps" id="setup-steps"></ol>
+  </div>
+</section>
+
+<!-- ======================================================================= DEVICE -->
+<section id="device">
+  <h2>2 · Prepare the device</h2>
+  <p class="sub">Tick these off before every session. Your ticks are kept in this browser only.</p>
+  <div class="card" id="checklist">
+    <label class="check"><input type="checkbox" data-k="usb"><span><b>USB connected.</b> Feedback needs only the USB cable. Linux: <code>ls -l /dev/haply</code>. Windows: Device Manager → Ports.</span></label>
+    <label class="check"><input type="checkbox" data-k="calib"><span><b>Calibrated.</b> Front LED <b>purple</b> means not calibrated: rest the cursor on the <b>magnetic dock</b> until the LED changes colour, then lift it off. Do this after every power-up. Until then the device reports X = 0 and V = 65535.</span></label>
+    <label class="check"><input type="checkbox" data-k="nodock"><span><b>Not parked on the dock.</b> Calibrate, then move it away; don't leave it resting there.</span></label>
+    <label class="check"><input type="checkbox" data-k="power"><span><b>Motor power only when you need forces.</b> Reading feedback doesn't need it. When you plug it in, expect a small jump of the handle, so hold it. Unplug it when nobody is using the device.</span></label>
+    <label class="check"><input type="checkbox" data-k="port"><span><b>Port is free.</b> Only one program can open the device. Close Haply Hub and stop the Haply Inverse Service on the same computer.</span></label>
+    <label class="check"><input type="checkbox" data-k="stow"><span><b>Stow when done.</b> Fold the arms together and pull back until it clicks.</span></label>
+    <div class="row" style="margin-top:8px"><button class="btn" type="button" id="check-reset">Clear ticks</button><span class="note" id="check-count"></span></div>
+  </div>
+</section>
+
+<!-- ======================================================================= RUN -->
+<section id="run">
+  <h2>3 · Run <code>01_read_fbk</code></h2>
+  <p class="sub">Set the options and copy the command. Press <b>Q</b> (or Ctrl+C) to stop. The CSV log lands in <code>logs/</code>.</p>
+  <div class="card">
+    <div class="row">
+      <label class="field">Port (blank = auto)
+        <input type="text" id="o-port" placeholder="auto" spellcheck="false" style="width:140px">
+      </label>
+      <label class="field">Loop rate, Hz (0 = max)
+        <input type="number" id="o-rate" value="1000" min="0" step="100">
+      </label>
+      <label class="field">Stop after, s (0 = on Q)
+        <input type="number" id="o-seconds" value="0" min="0" step="5">
+      </label>
+      <label class="field">Log capacity, s
+        <input type="number" id="o-log" value="120" min="1" step="10">
+      </label>
+      <label class="field">Screen refresh, Hz
+        <input type="number" id="o-print" value="20" min="1" step="5">
+      </label>
+    </div>
+    <div class="code"><pre id="run-cmd"></pre><button class="btn copy" type="button" data-copy="run-cmd">Copy</button></div>
+    <p class="note">What you should see: device id and UUID, raw joint angles, ten test samples, then one line refreshing
+      with <code>X</code> (m), <code>V</code> (m/s) and the achieved rate. If it says <b>NOT CALIBRATED</b>, go back to step 2.
+      On the lab Pi a 1 kHz loop keeps the device round trip near 0.15 ms; <code>--rate 0</code> reaches about 7.9 kHz.</p>
+    <details><summary>Running on the lab Pi from your laptop</summary>
+      <p class="note">Ask the lab admin to add your SSH key to the Pi, then <code>ssh</code> in and run the Linux commands there.
+        The examples read the keyboard over SSH, so <b>Q</b> works remotely too. Copy logs back with
+        <code>scp &lt;user&gt;@&lt;pi&gt;:myHAPLY-PyBULLET/logs/*.csv .</code></p>
+    </details>
+  </div>
+</section>
+
+<!-- ======================================================================= LOGS -->
+<section id="logs">
+  <h2>4 · Look at your data</h2>
+  <p class="sub">Drop a <code>haply_log_file__*.csv</code> here. It's read in your browser and never uploaded.</p>
+  <div class="drop" id="drop">
+    <p style="margin:0 0 10px">Drag a log file here, or</p>
+    <div class="row" style="justify-content:center">
+      <label class="btn primary" style="cursor:pointer">Choose file<input type="file" id="file" accept=".csv,text/csv" class="hidden"></label>
+      <button class="btn" type="button" id="demo">Try synthetic demo data</button>
+    </div>
+  </div>
+  <div id="viewer" class="hidden">
+    <div id="calib-banner"></div>
+    <div class="tiles" id="tiles"></div>
+    <div class="chart" id="c-pos"></div>
+    <div class="chart" id="c-vel"></div>
+    <div class="grid2">
+      <div class="chart" id="c-xy"></div>
+      <div class="chart" id="c-rt"></div>
+    </div>
+    <details class="card"><summary>Table view (every n-th sample)</summary><div id="table" style="overflow-x:auto;margin-top:10px"></div></details>
+  </div>
+</section>
+
+<!-- ======================================================================= EXAMPLES -->
+<section id="examples">
+  <h2>5 · Examples</h2>
+  <p class="sub">Each numbered <code>.cpp</code> in a numbered folder becomes its own program; re-run CMake after you add one.</p>
+  <div class="card" style="padding:6px 8px">
+    <table class="data">
+      <thead><tr><th>File</th><th>What it does</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td><code>100-Haply-basics/01_read_fbk.cpp</code></td><td>Wake the Inverse3, stream position + velocity at 1 kHz, print, log to CSV. Zero force.</td><td><span class="pill done">✓ tested on Pi</span></td></tr>
+        <tr><td><code>100-Haply-basics/02_virtual_wall.cpp</code></td><td>First force: a spring wall at z = 0 (needs motor power), <code>|F|</code> clamped by <code>F_max</code>.</td><td><span class="pill todo">open: good first PR</span></td></tr>
+        <tr><td><code>200-PyBullet/01_cursor_in_pybullet.cpp</code></td><td>Mirror the cursor into a PyBullet scene through shared memory (<code>python -m pybullet_utils.runServer</code>).</td><td><span class="pill todo">open</span></td></tr>
+        <tr><td><code>200-PyBullet/02_haptic_cube.cpp</code></td><td>Couple the cursor to a cube with a spring, as in myVIRTUOSE-PyBULLET, and feel the contact.</td><td><span class="pill todo">open</span></td></tr>
+        <tr><td><code>100-Haply-basics/03_udp_stream.cpp</code></td><td>Send X/V over UDP to another machine (for example MATLAB or Python) and receive commands back.</td><td><span class="pill todo">open</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ======================================================================= CONTRIBUTE -->
+<section id="contribute">
+  <h2>6 · Contribute through your fork</h2>
+  <p class="sub">Work in your fork, then send a pull request to the main repository. The commands use the username from step 1.</p>
+  <div class="card">
+    <ol class="steps" id="contrib-steps"></ol>
+    <h3>Template for a new example</h3>
+    <div class="code"><pre id="tpl"></pre><button class="btn copy" type="button" data-copy="tpl">Copy</button></div>
+    <h3>Pull-request checklist</h3>
+    <div class="check"><span>☐</span><span>Builds with CMake on at least one OS. Say which (Windows / Pi / other) in the PR.</span></div>
+    <div class="check"><span>☐</span><span>Ran on the real device. Attach a screenshot or a short CSV excerpt.</span></div>
+    <div class="check"><span>☐</span><span>Forces stay below <code>F_max</code>; the program sends zero force before it exits (<code>quick_stop()</code>).</span></div>
+    <div class="check"><span>☐</span><span>Device code stays in <code>libs/</code>; the example is short and has a header comment saying what it does.</span></div>
+    <div class="check"><span>☐</span><span>No <code>build/</code>, <code>logs/</code>, CSVs or Haply binaries committed.</span></div>
+  </div>
+</section>
+
+<!-- ======================================================================= PROTOCOL -->
+<section id="protocol">
+  <h2>Protocol reference</h2>
+  <p class="sub">What <code>libs/myHAPLY_v1.h</code> sends over the USB serial port. Floats are 32-bit little-endian.</p>
+  <div class="card" style="padding:6px 8px">
+    <table class="data">
+      <thead><tr><th>Purpose</th><th>Computer sends</th><th>Inverse3 answers</th></tr></thead>
+      <tbody>
+        <tr><td>Wake up (first, always)</td><td><code>0A</code></td><td><code>0B</code> + id (u16) + 3 bytes + 16-byte UUID</td></tr>
+        <tr><td>Cursor force → state</td><td><code>2A</code> + fx fy fz (N)</td><td><code>2B</code> + x y z (m) + vx vy vz (m/s)</td></tr>
+        <tr><td>Joint torque → joint state</td><td><code>1A</code> + τ1 τ2 τ3 (N·m)</td><td><code>1B</code> + q1 q2 q3 (deg) + q̇1 q̇2 q̇3 (deg/s)</td></tr>
+        <tr><td>Status event</td><td>(none)</td><td><code>BA</code> + type + length + payload, at any time, e.g. on a mode change</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">The force you send is held until the next command, so loops must keep sending, and must send zero before exiting.
+    Not calibrated: the position is <code>0</code> and the velocity is <code>65535</code>.</p>
+</section>
+
+<footer>
+  myHAPLY-PyBULLET · sibling of <a href="https://github.com/harshaturlapati/myVIRTUOSE-PyBULLET">myVIRTUOSE-PyBULLET</a> ·
+  <a href="https://github.com/harshaturlapati/myHAPLY-PyBULLET">repository</a> ·
+  Haply and Inverse3 are trademarks of Haply Robotics; this project is not affiliated with them.
+</footer>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const UPSTREAM = "harshaturlapati/myHAPLY-PyBULLET";
+  const $ = (s, el = document) => el.querySelector(s);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem("myhaply." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem("myhaply." + k, JSON.stringify(v)); } catch {} }
+  };
+
+  // ---------------------------------------------------------------- state
+  let os = store.get("os", /Win/i.test(navigator.platform) ? "win" : /Mac/i.test(navigator.platform) ? "mac" : "pi");
+  const userInput = $("#gh-user");
+  userInput.value = store.get("user", "");
+  const user = () => (userInput.value.trim().replace(/[^A-Za-z0-9-]/g, "") || "YOUR-USERNAME");
+
+  // ---------------------------------------------------------------- code blocks
+  function codeBlock(text) {
+    const wrap = document.createElement("div"); wrap.className = "code";
+    const pre = document.createElement("pre"); pre.textContent = text;
+    const b = document.createElement("button"); b.className = "btn copy"; b.type = "button"; b.textContent = "Copy";
+    b.addEventListener("click", () => copy(pre.textContent, b));
+    wrap.append(pre, b); return wrap;
+  }
+  function copy(text, btn) {
+    const done = () => { const o = btn.textContent; btn.textContent = "Copied"; setTimeout(() => btn.textContent = o, 1200); };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, () => fallback());
+    else fallback();
+    function fallback() { const t = document.createElement("textarea"); t.value = text; document.body.append(t); t.select();
+      try { document.execCommand("copy"); done(); } catch {} t.remove(); }
+  }
+  document.querySelectorAll("button.copy[data-copy]").forEach(b =>
+    b.addEventListener("click", () => copy($("#" + b.dataset.copy).textContent, b)));
+
+  function step(parent, html, code) {
+    const li = document.createElement("li");
+    const p = document.createElement("div"); p.innerHTML = html;   // static text written in this file only
+    li.append(p);
+    if (code) li.append(codeBlock(code));
+    parent.append(li);
+  }
+
+  // ---------------------------------------------------------------- setup steps
+  function renderSetup() {
+    const ol = $("#setup-steps"); ol.textContent = "";
+    const u = user();
+    const clone = `git clone https://github.com/${u}/myHAPLY-PyBULLET.git\ncd myHAPLY-PyBULLET\ngit remote add upstream https://github.com/${UPSTREAM}.git`;
+    if (os === "win") {
+      step(ol, "Install <b>Visual Studio 2022 or newer</b> (Community is free) with the workload <b>Desktop development with C++</b>, plus <a href='https://git-scm.com/download/win' target='_blank' rel='noopener'>Git for Windows</a>.");
+      step(ol, "Fork the repository (button above), then clone <b>your</b> fork in PowerShell:", clone);
+      step(ol, "Build everything. CMake and Ninja come with Visual Studio; no Haply software is needed.", "powershell -ExecutionPolicy Bypass -File scripts\\build_windows.ps1");
+      step(ol, "Or open the folder in Visual Studio (<i>File → Open → Folder</i>), pick the <code>100-Haply-basics_01_read_fbk.exe</code> target and press F5.");
+    } else if (os === "pi") {
+      step(ol, "Install the compiler, CMake and Git (on the lab Pi this is already done):", "sudo apt-get install --no-upgrade -y g++ cmake git");
+      step(ol, "Fork the repository (button above), then clone <b>your</b> fork:", clone);
+      step(ol, "Build:", "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release\ncmake --build build -j4");
+      step(ol, "Serial port permission: your user must be in the <code>dialout</code> group (check with <code>groups</code>):", "sudo usermod -aG dialout $USER   # then log out and back in");
+    } else {
+      step(ol, "Install the Xcode command-line tools and CMake:", "xcode-select --install\nbrew install cmake");
+      step(ol, "Fork the repository (button above), then clone <b>your</b> fork:", clone);
+      step(ol, "Build:", "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release\ncmake --build build -j8");
+      step(ol, "The device appears as <code>/dev/cu.usbmodem…</code>; the examples find it automatically, or pass <code>--port</code>. (macOS support is untested; please report how it goes.)");
+    }
+  }
+
+  // ---------------------------------------------------------------- run builder
+  function renderRun() {
+    const exe = os === "win" ? "build\\100-Haply-basics_01_read_fbk.exe" : "./build/100-Haply-basics_01_read_fbk";
+    const port = $("#o-port").value.trim().replace(/[^A-Za-z0-9_./\\-]/g, "");
+    const num = id => Math.max(0, Number($(id).value) || 0);
+    const parts = [exe];
+    if (port) parts.push("--port", port);
+    if (num("#o-rate") !== 1000) parts.push("--rate", String(num("#o-rate")));
+    if (num("#o-seconds")) parts.push("--seconds", String(num("#o-seconds")));
+    if (num("#o-log") !== 120) parts.push("--log-seconds", String(Math.max(1, num("#o-log"))));
+    if (num("#o-print") !== 20) parts.push("--print-hz", String(Math.max(1, num("#o-print"))));
+    $("#run-cmd").textContent = parts.join(" ");
+    $("#o-port").placeholder = os === "win" ? "auto, e.g. COM5" : os === "pi" ? "auto, e.g. /dev/haply" : "auto";
+  }
+  ["#o-port", "#o-rate", "#o-seconds", "#o-log", "#o-print"].forEach(id => $(id).addEventListener("input", renderRun));
+
+  // ---------------------------------------------------------------- contribute steps
+  function renderContrib() {
+    const ol = $("#contrib-steps"); ol.textContent = "";
+    const u = user();
+    step(ol, "Start from the latest upstream code, on a new branch named after your example:",
+      "git fetch upstream\ngit checkout -b 02-virtual-wall upstream/main");
+    step(ol, "Add your file as <code>NNN-Topic/NN_short_name.cpp</code> (template below), then rebuild. CMake finds it by its name.");
+    step(ol, "Commit and push to <b>your</b> fork:",
+      "git add 100-Haply-basics/02_virtual_wall.cpp\ngit commit -m \"Add 02_virtual_wall: spring wall at z = 0\"\ngit push -u origin 02-virtual-wall");
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    a.href = `https://github.com/${UPSTREAM}/compare/main...${u}:myHAPLY-PyBULLET:02-virtual-wall`;
+    a.target = "_blank"; a.rel = "noopener"; a.textContent = "Open a pull request";
+    li.append(a, document.createTextNode(" from your branch into " + UPSTREAM + ":main, and fill in the checklist below."));
+    ol.append(li);
+    step(ol, "Keep your fork up to date later:", "git fetch upstream\ngit checkout main\ngit merge upstream/main\ngit push");
+  }
+
+  $("#tpl").textContent =
+`// 02_virtual_wall.cpp - a spring wall at z = 0: push into it and it pushes back.
+// Needs motor power and a calibrated device. |F| is clamped to Haply.F_max (3 N by default).
+#include <myINCLUDES.h>
+#include <myHAPLY_v1.h>
+#include <myHAPLY_LOGGING.h>
+
+int main(int argc, char** argv)
+{
+    my::HighResTimer high_res_timer;
+    my::QuitKey quit;
+
+    myHAPLY Haply("Inverse3", argc > 1 ? argv[1] : "");   // optional port argument
+    if (!Haply.quick_start()) return 1;
+
+    myHAPLY_LOG Haply_LOG(60, 1000);
+    const float k = 300.0f;                                  // wall stiffness (N/m)
+    auto t_next = my::Clock::now();
+
+    while (!quit.pressed()) {
+        if (Haply.calibrated && Haply.X[2] < 0.0f)
+            Haply.F_cmd[2] = -k * Haply.X[2];                // push back out of the wall
+        Haply.render_F_cmd();                                 // send force, read X and V
+
+        HaplyLogRow row;
+        row.t_us = my::tick_us();
+        row.unix_ns = my::unix_ns();
+        for (int i = 0; i < 3; i++) { row.pos[i] = Haply.X[i]; row.vel[i] = Haply.V[i]; row.f_cmd[i] = Haply.F_sent[i]; }
+        row.loop_us = Haply.last_exchange_us;
+        Haply_LOG.write2LOG(row);
+
+        t_next += std::chrono::milliseconds(1);              // 1 kHz
+        my::sleep_until(t_next);
+    }
+
+    Haply.quick_stop();                                       // zero force, close the port
+    Haply_LOG.write2FILE(Haply.name);
+    return 0;
+}`;
+
+  // ---------------------------------------------------------------- OS + user wiring
+  function setOS(v) {
+    os = v; store.set("os", v);
+    document.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.os === v)));
+    renderSetup(); renderRun();
+  }
+  document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => setOS(b.dataset.os)));
+  userInput.addEventListener("input", () => { store.set("user", userInput.value.trim()); renderSetup(); renderContrib(); });
+  setOS(os); renderContrib();
+
+  // ---------------------------------------------------------------- checklist
+  const ticks = store.get("ticks", {});
+  const boxes = [...document.querySelectorAll("#checklist input[type=checkbox]")];
+  function countTicks() { const n = boxes.filter(b => b.checked).length; $("#check-count").textContent = `${n} of ${boxes.length} done`; }
+  boxes.forEach(b => { b.checked = !!ticks[b.dataset.k];
+    b.addEventListener("change", () => { ticks[b.dataset.k] = b.checked; store.set("ticks", ticks); countTicks(); }); });
+  $("#check-reset").addEventListener("click", () => { boxes.forEach(b => { b.checked = false; ticks[b.dataset.k] = false; }); store.set("ticks", ticks); countTicks(); });
+  countTicks();
+
+  // ================================================================ LOG VIEWER
+  const drop = $("#drop");
+  ["dragenter", "dragover"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", ev => { const f = ev.dataTransfer.files[0]; if (f) readFile(f); });
+  $("#file").addEventListener("change", ev => { const f = ev.target.files[0]; if (f) readFile(f); });
+  $("#demo").addEventListener("click", () => show(demoData(), "synthetic demo data (not from a device)"));
+
+  function readFile(f) {
+    const r = new FileReader();
+    r.onload = () => { try { show(parseCSV(String(r.result)), f.name); } catch (e) { banner("bad", "Could not read this file: " + e.message); } };
+    r.readAsText(f);
+  }
+
+  function parseCSV(text) {
+    const lines = text.split(/\r?\n/);
+    let name = "";
+    let h = lines.findIndex(l => l.startsWith("Time(ms)"));
+    if (h < 0) throw new Error("no header line starting with Time(ms) - is this a myHAPLY log?");
+    const m = /^Robot NAME:(.*)$/.exec(lines[0] || ""); if (m) name = m[1].trim();
+    const cols = lines[h].split(",").map(s => s.trim());
+    const idx = k => cols.indexOf(k);
+    const need = ["Time(s)", "X", "Y", "Z", "VX", "VY", "VZ"];
+    need.forEach(k => { if (idx(k) < 0) throw new Error("missing column " + k); });
+    const C = { t: idx("Time(s)"), x: idx("X"), y: idx("Y"), z: idx("Z"), vx: idx("VX"), vy: idx("VY"), vz: idx("VZ"),
+                f1: idx("f1"), f2: idx("f2"), f3: idx("f3"), lu: idx("loop_us") };
+    const rows = [];
+    for (let i = h + 1; i < lines.length; i++) {
+      if (!lines[i]) continue;
+      const p = lines[i].split(",");
+      const g = k => (C[k] >= 0 ? parseFloat(p[C[k]]) : NaN);
+      const t = g("t"); if (!isFinite(t)) continue;
+      rows.push({ t, x: g("x"), y: g("y"), z: g("z"), vx: g("vx"), vy: g("vy"), vz: g("vz"),
+                  f: Math.hypot(g("f1") || 0, g("f2") || 0, g("f3") || 0), lu: g("lu") });
+    }
+    if (!rows.length) throw new Error("no data rows");
+    return { name, rows };
+  }
+
+  function demoData() {   // synthetic: a slow figure-eight with noise, ~10 s at 1 kHz
+    const rows = []; let seed = 7;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5;
+    for (let i = 0; i < 10000; i++) {
+      const t = i / 1000, w = 2 * Math.PI * 0.25;
+      const calib = t > 1.2;
+      const x = calib ? 0.05 * Math.sin(w * t) + 0.0003 * rnd() : 0;
+      const y = calib ? 0.03 * Math.sin(2 * w * t) - 0.12 + 0.0003 * rnd() : 0;
+      const z = calib ? 0.02 * Math.cos(w * t) + 0.15 + 0.0003 * rnd() : 0;
+      const vx = calib ? 0.05 * w * Math.cos(w * t) + 0.004 * rnd() : 65535;
+      const vy = calib ? 0.06 * w * Math.cos(2 * w * t) + 0.004 * rnd() : 65535;
+      const vz = calib ? -0.02 * w * Math.sin(w * t) + 0.004 * rnd() : 65535;
+      const lu = 120 + 30 * Math.abs(rnd()) + (i % 1500 === 700 ? 900 : 0);
+      rows.push({ t, x, y, z, vx, vy, vz, f: 0, lu });
+    }
+    return { name: "Inverse3 (demo)", rows };
+  }
+
+  function banner(kind, text) {
+    const el = $("#calib-banner"); el.textContent = "";
+    if (!text) return;
+    const d = document.createElement("div"); d.className = "status " + kind; d.setAttribute("role", "status");
+    const icons = {
+      warn: '<svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M10 2 1 18h18L10 2Zm0 5 .1 0c.5 0 .9.4.9.9l-.3 4.6a.7.7 0 0 1-1.4 0L9 7.9c0-.5.4-.9 1-.9Zm0 9.2a1.1 1.1 0 1 1 0-2.2 1.1 1.1 0 0 1 0 2.2Z"/></svg>',
+      good: '<svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="m6 10 3 3 5-6" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>',
+      bad:  '<svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="m7 7 6 6m0-6-6 6" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>'
+    };
+    const label = { warn: "Warning", good: "OK", bad: "Error" }[kind];
+    const span = document.createElement("span");
+    const b = document.createElement("b"); b.textContent = label + ": ";
+    span.append(b, document.createTextNode(text));
+    d.innerHTML = icons[kind]; d.append(span); el.append(d);
+    $("#viewer").classList.remove("hidden");
+  }
+
+  const fmt = (v, d = 3) => (isFinite(v) ? v.toFixed(d) : "–");
+  function pct(arr, q) { if (!arr.length) return NaN; const s = Float64Array.from(arr).sort(); return s[Math.min(s.length - 1, Math.floor(q * s.length))]; }
+
+  function show(data, label) {
+    const R = data.rows;
+    const valid = r => !(r.vx >= 65000 && r.vy >= 65000 && r.vz >= 65000);
+    const nValid = R.filter(valid).length;
+    const dur = R[R.length - 1].t - R[0].t;
+    const rate = dur > 0 ? (R.length - 1) / dur : NaN;
+    const lus = R.map(r => r.lu).filter(isFinite);
+    $("#viewer").classList.remove("hidden");
+
+    if (nValid === 0) banner("warn", "the device was NOT CALIBRATED for this whole log (X = 0, V = 65535). Rest the cursor on the magnetic dock until the LED stops being purple, lift it off, and record again.");
+    else if (nValid < R.length) banner("warn", `the device was not calibrated for ${((1 - nValid / R.length) * 100).toFixed(1)} % of the samples (before calibration X = 0, V = 65535). Those samples are left out of the plots.`);
+    else banner("good", "calibrated for the whole log.");
+
+    // tiles
+    const tiles = $("#tiles"); tiles.textContent = "";
+    const tile = (k, v, s) => { const d = document.createElement("div"); d.className = "tile";
+      const a = document.createElement("div"); a.className = "k"; a.textContent = k;
+      const b = document.createElement("div"); b.className = "v"; b.textContent = v;
+      const c = document.createElement("div"); c.className = "s"; c.textContent = s || "";
+      d.append(a, b, c); tiles.append(d); };
+    tile("File", data.name || "Inverse3", label);
+    tile("Samples", R.length.toLocaleString(), `${fmt(dur, 2)} s`);
+    tile("Achieved rate", `${fmt(rate, 0)} Hz`, "samples per second");
+    tile("Round trip", lus.length ? `${fmt(lus.reduce((a, b) => a + b, 0) / lus.length, 0)} µs` : "–", lus.length ? `p99 ${fmt(pct(lus, 0.99), 0)} µs · max ${fmt(Math.max(...lus), 0)} µs` : "");
+    const V = R.filter(valid);
+    if (V.length) {
+      const span = k => Math.max(...V.map(r => r[k])) - Math.min(...V.map(r => r[k]));
+      tile("Workspace used", `${fmt(Math.max(span("x"), span("y"), span("z")) * 100, 1)} cm`, `x ${fmt(span("x") * 100, 1)} · y ${fmt(span("y") * 100, 1)} · z ${fmt(span("z") * 100, 1)} cm`);
+    }
+
+    // position/velocity/trajectory charts only make sense with calibrated samples
+    ["#c-pos", "#c-vel", "#c-xy"].forEach(id => $(id).classList.toggle("hidden", nValid === 0));
+    const ds = downsample(R, 1400);
+    const dsV = ds.map(r => valid(r) ? r : { ...r, x: NaN, y: NaN, z: NaN, vx: NaN, vy: NaN, vz: NaN });
+    const S = [["x", "X", "--series-1"], ["y", "Y", "--series-2"], ["z", "Z", "--series-3"]];
+    lineChart($("#c-pos"), "Cursor position", "metres, device frame", dsV, S.map(([k, n, c]) => ({ k, n, c })), v => fmt(v, 4) + " m");
+    lineChart($("#c-vel"), "Cursor velocity", "metres per second", dsV,
+      [["vx", "VX", "--series-1"], ["vy", "VY", "--series-2"], ["vz", "VZ", "--series-3"]].map(([k, n, c]) => ({ k, n, c })), v => fmt(v, 3) + " m/s");
+    lineChart($("#c-rt"), "Device round trip", "microseconds per exchange (highest in each slice)", downsample(R, 600, "lu"),
+      [{ k: "lu", n: "round trip", c: "--series-1" }], v => fmt(v, 0) + " µs", true);
+    pathChart($("#c-xy"), dsV.filter(r => isFinite(r.x)));
+    table(R);
+  }
+
+  // keep the shape: per bucket keep the first sample, but for `peakKey` keep the bucket maximum
+  function downsample(R, n, peakKey) {
+    if (R.length <= n) return R.slice();
+    const out = [], step = R.length / n;
+    for (let i = 0; i < n; i++) {
+      const a = Math.floor(i * step), b = Math.min(R.length, Math.floor((i + 1) * step));
+      let pick = R[a];
+      if (peakKey) for (let j = a; j < b; j++) if (R[j][peakKey] > pick[peakKey]) pick = R[j];
+      out.push(pick);
+    }
+    return out;
+  }
+
+  function niceTicks(lo, hi, n = 5) {
+    if (!isFinite(lo) || !isFinite(hi)) return [0, 1];
+    if (lo === hi) { lo -= 1e-3; hi += 1e-3; }
+    const span = hi - lo, raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const st = [1, 2, 2.5, 5, 10].map(s => s * mag).find(s => span / s <= n) || 10 * mag;
+    // first tick at or below lo, last at or above hi, so the axis always encloses the data
+    const a = Math.floor(lo / st + 1e-9), b = Math.ceil(hi / st - 1e-9);
+    const t = []; for (let i = a; i <= b; i++) t.push(+(i * st).toFixed(12));
+    return t;
+  }
+  const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.append(e); return e; };
+
+  function chartShell(box, title, cap, series) {
+    box.textContent = "";
+    const h = document.createElement("h4"); h.textContent = title;
+    const p = document.createElement("p"); p.className = "cap"; p.textContent = cap;
+    box.append(h, p);
+    if (series && series.length > 1) {
+      const lg = document.createElement("div"); lg.className = "legend";
+      series.forEach(s => { const sp = document.createElement("span"); const i = document.createElement("i"); i.style.background = css(s.c); sp.append(i, document.createTextNode(s.n)); lg.append(sp); });
+      box.append(lg);
+    }
+    const tip = document.createElement("div"); tip.className = "tip"; box.append(tip);
+    return tip;
+  }
+
+  function lineChart(box, title, cap, rows, series, fmtV, zeroBase) {
+    const tip = chartShell(box, title, cap, series);
+    const W = Math.max(320, box.clientWidth - 32), H = 220, m = { l: 62, r: series.length > 1 ? 34 : 12, t: 10, b: 26 };
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": title }, box);
+    const xs = rows.map(r => r.t);
+    let lo = Infinity, hi = -Infinity;
+    rows.forEach(r => series.forEach(s => { const v = r[s.k]; if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }));
+    if (zeroBase) lo = Math.min(0, lo);
+    if (!isFinite(lo)) { lo = 0; hi = 1; }
+    const yt = niceTicks(lo, hi), y0 = yt[0], y1 = yt[yt.length - 1];
+    const xt = niceTicks(xs[0], xs[xs.length - 1], 6);
+    const X = t => m.l + (t - xs[0]) / ((xs[xs.length - 1] - xs[0]) || 1) * (W - m.l - m.r);
+    const Y = v => H - m.b - (v - y0) / ((y1 - y0) || 1) * (H - m.t - m.b);
+    yt.forEach(v => { el("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: css("--grid"), "stroke-width": 1 }, svg);
+      const t = el("text", { x: m.l - 8, y: Y(v) + 4, "text-anchor": "end" }, svg); t.textContent = fmtV(v).replace(/ .*/, ""); });
+    xt.filter(v => v >= xs[0] && v <= xs[xs.length - 1]).forEach(v => { const t = el("text", { x: X(v), y: H - 8, "text-anchor": "middle" }, svg); t.textContent = v + " s"; });
+    el("line", { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: css("--axis"), "stroke-width": 1 }, svg);
+    series.forEach(s => {
+      let d = "", pen = false, last = null;
+      rows.forEach(r => { const v = r[s.k]; if (!isFinite(v)) { pen = false; return; }
+        d += (pen ? "L" : "M") + X(r.t).toFixed(1) + "," + Y(v).toFixed(1); pen = true; last = r; });
+      el("path", { d, fill: "none", stroke: css(s.c), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+      if (series.length > 1 && last) { const t = el("text", { x: X(last.t) + 6, y: Y(last[s.k]) + 4, class: "dl" }, svg); t.textContent = s.n; }
+    });
+    const cross = el("line", { y1: m.t, y2: H - m.b, stroke: css("--axis"), "stroke-width": 1, visibility: "hidden" }, svg);
+    const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }, svg);
+    hit.addEventListener("pointermove", ev => {
+      const pt = svg.getBoundingClientRect(); const sx = (ev.clientX - pt.left) * (W / pt.width);
+      let best = 0, bd = Infinity; rows.forEach((r, i) => { const dd = Math.abs(X(r.t) - sx); if (dd < bd) { bd = dd; best = i; } });
+      const r = rows[best]; cross.setAttribute("x1", X(r.t)); cross.setAttribute("x2", X(r.t)); cross.setAttribute("visibility", "visible");
+      tip.textContent = "";
+      const tt = document.createElement("div"); tt.className = "t"; tt.textContent = `t = ${fmt(r.t, 3)} s`; tip.append(tt);
+      series.forEach(s => { const row = document.createElement("div"); row.className = "r";
+        const i = document.createElement("i"); i.style.background = css(s.c);
+        const b = document.createElement("b"); b.textContent = isFinite(r[s.k]) ? fmtV(r[s.k]) : "not calibrated";
+        const n = document.createElement("span"); n.textContent = s.n; row.append(i, b, n); tip.append(row); });
+      tip.style.display = "block";
+      const bx = box.getBoundingClientRect(); let left = ev.clientX - bx.left + 14;
+      if (left + 180 > bx.width) left = ev.clientX - bx.left - 190;
+      tip.style.left = left + "px"; tip.style.top = (ev.clientY - bx.top + 10) + "px";
+    });
+    hit.addEventListener("pointerleave", () => { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); });
+  }
+
+  function pathChart(box, rows) {
+    const tip = chartShell(box, "Trajectory, top view", "X against Y (metres); the dot marks the end");
+    if (!rows.length) { const p = document.createElement("p"); p.className = "note"; p.textContent = "No calibrated samples to draw."; box.append(p); return; }
+    const W = Math.max(280, box.clientWidth - 32), H = 220, m = 34;
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Trajectory X against Y" }, box);
+    const xr = [Math.min(...rows.map(r => r.x)), Math.max(...rows.map(r => r.x))];
+    const yr = [Math.min(...rows.map(r => r.y)), Math.max(...rows.map(r => r.y))];
+    const span = Math.max(xr[1] - xr[0], yr[1] - yr[0], 1e-3) * 1.1;
+    const cx = (xr[0] + xr[1]) / 2, cy = (yr[0] + yr[1]) / 2;
+    const s = Math.min(W - 2 * m, H - 2 * m) / span;
+    const X = v => W / 2 + (v - cx) * s, Y = v => H / 2 - (v - cy) * s;
+    el("line", { x1: m / 2, x2: W - m / 2, y1: H / 2, y2: H / 2, stroke: css("--grid") }, svg);
+    el("line", { x1: W / 2, x2: W / 2, y1: m / 2, y2: H - m / 2, stroke: css("--grid") }, svg);
+    let d = ""; rows.forEach((r, i) => d += (i ? "L" : "M") + X(r.x).toFixed(1) + "," + Y(r.y).toFixed(1));
+    el("path", { d, fill: "none", stroke: css("--series-1"), "stroke-width": 2, "stroke-linejoin": "round" }, svg);
+    const e = rows[rows.length - 1];
+    el("circle", { cx: X(e.x), cy: Y(e.y), r: 5, fill: css("--series-1"), stroke: css("--surface-1"), "stroke-width": 2 }, svg);
+    const t1 = el("text", { x: W - m / 2, y: H / 2 - 6, "text-anchor": "end" }, svg); t1.textContent = "X";
+    const t2 = el("text", { x: W / 2 + 6, y: m / 2 + 8 }, svg); t2.textContent = "Y";
+    const t3 = el("text", { x: m / 2, y: H - 6 }, svg); t3.textContent = `scale: ${fmt(span * 100, 1)} cm across`;
+    svg.addEventListener("pointermove", ev => {
+      const pt = svg.getBoundingClientRect(); const sx = (ev.clientX - pt.left) * (W / pt.width), sy = (ev.clientY - pt.top) * (H / pt.height);
+      let best = rows[0], bd = Infinity; rows.forEach(r => { const dd = (X(r.x) - sx) ** 2 + (Y(r.y) - sy) ** 2; if (dd < bd) { bd = dd; best = r; } });
+      tip.textContent = ""; const tt = document.createElement("div"); tt.className = "t"; tt.textContent = `t = ${fmt(best.t, 3)} s`; tip.append(tt);
+      [["X", best.x], ["Y", best.y]].forEach(([n, v]) => { const row = document.createElement("div"); row.className = "r";
+        const b = document.createElement("b"); b.textContent = fmt(v, 4) + " m"; const sp = document.createElement("span"); sp.textContent = n; row.append(b, sp); tip.append(row); });
+      tip.style.display = "block"; const bx = box.getBoundingClientRect();
+      tip.style.left = Math.min(ev.clientX - bx.left + 14, bx.width - 170) + "px"; tip.style.top = (ev.clientY - bx.top + 10) + "px";
+    });
+    svg.addEventListener("pointerleave", () => tip.style.display = "none");
+  }
+
+  function table(R) {
+    const box = $("#table"); box.textContent = "";
+    const every = Math.max(1, Math.ceil(R.length / 200));
+    const t = document.createElement("table"); t.className = "data num";
+    const head = ["t (s)", "X (m)", "Y (m)", "Z (m)", "VX (m/s)", "VY (m/s)", "VZ (m/s)", "|F| (N)", "round trip (µs)"];
+    const tr = document.createElement("tr"); head.forEach(h => { const th = document.createElement("th"); th.textContent = h; tr.append(th); });
+    const thead = document.createElement("thead"); thead.append(tr); t.append(thead);
+    const tb = document.createElement("tbody");
+    for (let i = 0; i < R.length; i += every) { const r = R[i], row = document.createElement("tr");
+      [fmt(r.t, 3), fmt(r.x, 5), fmt(r.y, 5), fmt(r.z, 5), fmt(r.vx, 4), fmt(r.vy, 4), fmt(r.vz, 4), fmt(r.f, 3), fmt(r.lu, 0)]
+        .forEach(v => { const td = document.createElement("td"); td.textContent = v; row.append(td); }); tb.append(row); }
+    t.append(tb);
+    const note = document.createElement("p"); note.className = "note"; note.textContent = `Showing every ${every}th of ${R.length.toLocaleString()} samples.`;
+    box.append(note, t);
+  }
+
+  // redraw charts on resize / theme change
+  let last = null; const _show = show;
+  show = function (d, l) { last = [d, l]; _show(d, l); };
+  let rz; window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => last && _show(...last), 150); });
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => last && _show(...last));
+})();
+</script>
+</body>
+</html>

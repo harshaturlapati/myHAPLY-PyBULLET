@@ -1,0 +1,23 @@
+# build output
+build/
+build-*/
+out/
+.vs/
+.vscode/
+CMakeUserPresets.json
+
+# experiment logs
+logs/
+*.csv
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# local tooling
+.claude/
