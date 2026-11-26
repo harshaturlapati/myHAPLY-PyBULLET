@@ -996,22 +996,28 @@ function scatterChart(box, pts, fit, xl, yl) {
 }
 
 // =========================================================================================== learn
-let lessons = null;
-async function initLearn() {
-  if (lessons) return;
-  try { lessons = await (await fetch("learn/index.json")).json(); } catch { lessons = []; }
-  $("#lesson-list").replaceChildren(...lessons.map(l => h("button", { type: "button", "data-file": l.file, onclick: () => (location.hash = "lesson=" + l.file) },
-    h("b", { text: l.title }), h("span", { text: `${l.minutes || "?"} min · ${l.summary || ""}` }))));
-  if (!$("#lesson").childElementCount && lessons.length) openLesson(lessons[0].file);
+let lessons = null, lessonsLoading = null, currentLesson = null;
+function loadLessonList() {
+  if (!lessonsLoading) lessonsLoading = (async () => {
+    try { lessons = await (await fetch("learn/index.json")).json(); } catch { lessons = []; }
+    $("#lesson-list").replaceChildren(...lessons.map(l => h("button", { type: "button", "data-file": l.file, onclick: () => (location.hash = "lesson=" + l.file) },
+      h("b", { text: l.title }), h("span", { text: `${l.minutes || "?"} min · ${l.summary || ""}` }))));
+  })();
+  return lessonsLoading;
 }
-let currentLesson = null;
+async function initLearn() {
+  await loadLessonList();
+  // open the first lesson only if nothing was asked for (a #lesson= link sets currentLesson first)
+  setTimeout(() => { if (!currentLesson && lessons.length) openLesson(lessons[0].file); }, 0);
+}
 async function openLesson(file) {
-  await initLearn();
   if (!/^[\w.-]+\.md$/.test(file)) return;
   currentLesson = file;
+  await loadLessonList();
   $$("#lesson-list button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.file === file)));
   let md = "";
   try { const r = await fetch("learn/" + file); if (!r.ok) throw 0; md = await r.text(); } catch { $("#lesson").replaceChildren(h("p", { class: "note", text: "Could not load this lesson." })); return; }
+  if (currentLesson !== file) return;          // a newer request won
   $("#lesson").innerHTML = renderMarkdown(md);
   $$("#lesson a").forEach(a => { const href = a.getAttribute("href") || ""; if (!href.startsWith("#")) { a.target = "_blank"; a.rel = "noopener"; } });
   $("#lesson-edit").href = `${GITHUB}/edit/main/docs/learn/${file}`;
