@@ -5,7 +5,8 @@ Sibling of [myVIRTUOSE-PyBULLET](https://github.com/harshaturlapati/myVIRTUOSE-P
 "one numbered `.cpp` = one executable" convention, same device-object style (`quick_start()`, `getPOS()`,
 `render_F_cmd()`, `quick_stop()`), but every line builds on both operating systems.
 
-**Student guide (interactive):** open [`docs/index.html`](docs/index.html). It has setup steps for each OS, a viewer
+**Student guide (interactive):** <https://harshaturlapati.github.io/myHAPLY-PyBULLET/> (the same page is
+[`docs/index.html`](docs/index.html), which also works offline). It has setup steps for each OS, a viewer
 for the CSV logs the examples write, and the fork → branch → pull-request workflow.
 
 ## How the code talks to the Haply
