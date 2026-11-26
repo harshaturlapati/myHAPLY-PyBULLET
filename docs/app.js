@@ -423,7 +423,16 @@ $("#control-btn").addEventListener("click", async () => {
     if (!ok || !inp.value.trim()) return;
     $("#my-name").value = inp.value.trim(); store.set("name", inp.value.trim());
   }
-  try { await api("control", { action: "take" }); toast("You are in control. Others can watch."); }
+  try {
+    await api("control", { action: "take" });
+    if (app.S) app.S.control = { ...(app.S.control || {}), you: true };
+    if (app._pendingTry) {                               // load what a Try-it link set up
+      app._pendingTry = false; app._adopted = true;
+      await send(presetCommands());
+      toast(`You are in control. Loaded: ${PRESETS[P.preset].label}. Switch forces on when you are holding the handle.`);
+    } else toast("You are in control. Others can watch.");
+    renderPresetUI();
+  }
   catch (e) { toast(e.status === 409 ? `${e.body && e.body.holder} is driving the device right now. Ask them to release control.` : e.message, "bad"); }
 });
 $("#my-name").value = store.get("name", "");
@@ -485,6 +494,7 @@ function pushParams() {
 function adoptEngineParams(par) {
   // While someone else drives (or just after taking control) show what the engine is really doing.
   if (!live()) return;                                  // the browser simulator follows the page, not the reverse
+  if (app._pendingTry) return;                          // a Try-it link is waiting for "Take control": keep showing it
   if (inControl() && performance.now() - userEditedAt < 4000) return;
   if (inControl() && app._adopted) return;
   const k = par.k || [0, 0, 0], b = par.b || [0, 0, 0];
@@ -768,8 +778,9 @@ function applyTry(hp) {
   ["fx", "fy", "fz"].forEach(a => { if (hp.has(a)) P[a] = hp.get(a); });
   history.replaceState(null, "", "#tab=play");
   showTab("play");
+  if (!inControl()) app._pendingTry = true;           // loaded as soon as you take control
   pushParams();
-  if (!inControl()) toast("Take control (top right) to load this on the device. You can still read the equation.");
+  if (!inControl()) toast(`${PRESETS[preset].label} is ready. Press “Take control” (top right) and it loads on the device.`);
   else toast(`Loaded: ${PRESETS[preset].label}. Switch forces on when you are holding the handle.`);
 }
 
