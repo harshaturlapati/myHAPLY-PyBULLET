@@ -25,7 +25,9 @@ KEYDIR="$HOME/.config/haply-lab"          # the lab key and the view key, writte
 case "$REPO" in                          # the path goes into the service files, where these characters break it
   *[[:space:]#%\&]*) echo "Move the repository to a path without spaces or # % & (now: $REPO)."; exit 1;;
 esac
-sudo -v || { echo "This account needs sudo."; exit 1; }
+# "sudo -n true" runs a harmless command without asking for a password. ("sudo -v" would ask even when
+# commands need no password, e.g. on Raspberry Pi OS, where the sudo group's rule also matches the user.)
+sudo -n true 2>/dev/null || sudo true || { echo "This account needs sudo."; exit 1; }
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 WARNINGS=""
