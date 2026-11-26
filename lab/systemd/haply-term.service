@@ -11,8 +11,14 @@ WorkingDirectory=/home/student
 ExecStart=/usr/bin/python3 @REPO@/lab/haply_term.py --port 8781
 Restart=always
 RestartSec=3
+# A stop or restart ends every process of this service, also the ones a student started with nohup or setsid so
+# that they outlive their terminal; what ignores SIGTERM is SIGKILLed after 5 s. (control-group is the default,
+# written out on purpose.) 'sudo systemctl restart haply-term' is therefore the end-of-class clean-up.
+KillMode=control-group
+TimeoutStopSec=5
 
-# Sandbox. 'student' has no sudo and is only in group dialout (for /dev/haply). On top of that:
+# Sandbox. 'student' has no password, no login shell, no SSH (setup_pi.sh), no sudo, and is only in group
+# dialout (for /dev/haply). On top of that:
 NoNewPrivileges=yes
 # no CAN sockets (the Piper arms) and no raw/netlink sockets: only local, IPv4 and IPv6
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
@@ -21,9 +27,24 @@ ProtectSystem=full
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
+# other users' processes are hidden (ps, /proc/<pid>/cmdline), so students cannot watch the lab server's
+# processes or read their command lines
+ProtectProc=invisible
 # keep heavy builds from starving the haptic engine (which also runs at real-time priority on its own core)
 CPUQuota=200%
 TasksMax=256
+# ... and from filling the Pi's memory, which would stall the web server and its heartbeat (forces cut out).
+# Above 700 MB all student processes together are slowed down and their memory is reclaimed; at 900 MB the
+# kernel kills the biggest one (usually a compiler: build with -j1 or -j2). This needs the kernel's memory
+# controller, which some Raspberry Pi kernels switch off: setup_pi.sh switches it on (one reboot).
+MemoryHigh=700M
+MemoryMax=900M
+# if the whole Pi still runs out of memory, the kernel kills student processes first (haply-lab has -500);
+# a student process can raise its own score but never lower it below this
+OOMScoreAdjust=500
+# When the kernel kills one student process for using too much memory, keep the service (and everybody else's
+# terminal) running. The default for services, 'stop', would end every terminal session.
+OOMPolicy=continue
 
 [Install]
 WantedBy=multi-user.target

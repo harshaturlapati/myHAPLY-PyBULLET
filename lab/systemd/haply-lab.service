@@ -16,5 +16,19 @@ RestartSec=3
 LimitRTPRIO=60
 LimitMEMLOCK=infinity
 
+# Stopping (systemctl stop/restart, a shutdown) and a crash of the Python server. systemd sends SIGTERM to every
+# process of this service, so to the server AND the engine. Both catch it: the server sends 'forces 0' and 'quit'
+# and waits for the engine; the engine switches forces off, sends a zero-force frame, closes the port and
+# finishes writing a recording (the server waits up to 20 s while it still reports). Anything still running 25 s
+# later is SIGKILLed.
+# This is systemd's default mode, written out on purpose. Do not change it to 'mixed': mixed sends the SIGTERM to the
+# server only and SIGKILLs the engine the moment the server exits. After a server crash that is at once, and an
+# engine killed by SIGKILL cannot send its zero-force frame.
+KillMode=control-group
+TimeoutStopSec=25
+# If the Pi runs out of memory, the kernel's OOM killer picks the process with the highest score. Make the lab
+# (server and engine: the engine inherits this) one of the last choices. Student shells get +500 (haply-term.service).
+OOMScoreAdjust=-500
+
 [Install]
 WantedBy=multi-user.target

@@ -46,7 +46,7 @@ These lines come from the engine, in `lab/engine/haply_lab_engine.cpp`:
 
 ```cpp
         o << "# scenario: kind=" << haptics::kind_name(scn_.kind) << " xd=" << fmt3(xd_tgt_) << " rpy=" << fmt3(rpy_tgt_)
-          << " k=" << fmt3(k_tgt_, 1) << " b=" << fmt3(b_tgt_, 2) << " fmax=" << fmax_ << "\n";
+          << " k=" << fmt3(k_tgt_, 1) << " b=" << fmt3(b_tgt_, 2) << " fmax=" << fmax_tgt_ << "\n";
 ```
 
 Copy parameters into your Method from there, not from memory. Convert rpy to degrees if you report degrees
@@ -77,7 +77,7 @@ Useful line numbers (open the Code tab to confirm them in your version):
 | impedance (spring, line, plane, damping) | `libs/myHAPLY_SCENARIOS.h` | 97 to 98 |
 | wall | `libs/myHAPLY_SCENARIOS.h` | 102 to 106 |
 | custom equations | `libs/myHAPLY_SCENARIOS.h` | 110 to 113 |
-| safety checks, fade-in, force cap | `lab/engine/haply_lab_engine.cpp` | 263 to 281 |
+| safety checks, force cap, fade-in | `lab/engine/haply_lab_engine.cpp` | 484 to 508 |
 
 Always pair the code with the equation it implements, side by side, the way the lessons do.
 

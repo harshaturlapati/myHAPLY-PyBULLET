@@ -82,11 +82,22 @@ public:
             printf("Looking for an Inverse3 (USB %04x:%04x)...\n", USB_VID, USB_PID);
             candidates = my::find_usb_serial_ports(USB_VID, USB_PID);
         }
+        last_error = candidates.empty() ? "no Inverse3 found" : "";
         for (const auto& p : candidates) {
             printf("Trying %s\n", p.c_str());
-            if (!serial_.open(p)) { printf("  %s\n", serial_.last_error().c_str()); continue; }
-            if (wakeup()) { port = p; return true; }
-            printf("  no Inverse3 answer on %s\n", p.c_str());
+            if (!serial_.open(p)) {
+                last_error = serial_.last_error();          // e.g. "port ... is in use by another program"
+                printf("  %s\n", last_error.c_str());
+                continue;
+            }
+            if (wakeup()) {
+                port = p;
+                consecutive_errors = 0;   // a fresh start: the old error streak belongs to the old connection
+                calibrated = false;       // known again after the first exchange
+                return true;
+            }
+            last_error = "no Inverse3 answer on " + p;
+            printf("  %s\n", last_error.c_str());
             serial_.close();
         }
         fprintf(stderr,
@@ -111,13 +122,28 @@ public:
         tx[0] = CMD_CURSOR_FORCE;
         std::memcpy(tx + 1, f, 12);
         float rx[6];
-        const bool ok = serial_.write_all(tx, sizeof(tx)) && read_reply(RSP_CURSOR_STATE, rx, 6);
+        bool ok = serial_.write_all(tx, sizeof(tx));
+        if (!ok) last_error = serial_.last_error();          // e.g. "write timeout", "device disconnected"
+        else ok = read_reply(RSP_CURSOR_STATE, rx, 6);       // sets last_error itself on failure
+        if (ok && !plausible(rx)) { ok = false; last_error = "implausible reply (bytes out of step?)"; }
         last_exchange_us = std::chrono::duration<float, std::micro>(my::Clock::now() - t0).count();
         n_exchanges++;
         if (!ok) { n_errors++; consecutive_errors++; resync(); return false; }
         consecutive_errors = 0;
         for (int i = 0; i < 3; i++) { X[i] = rx[i]; V[i] = rx[3 + i]; }
         calibrated = !(V[0] >= 65000.0f && V[1] >= 65000.0f && V[2] >= 65000.0f);
+        return true;
+    }
+
+    // A reply can only be trusted if it looks like a real arm: finite numbers, the cursor within 1 m of the
+    // base, and a speed below 20 m/s (or 65535 on all three axes: "not calibrated yet"). Anything else means
+    // the bytes were read out of step (for example the tail of a late reply), and must not drive a force.
+    static bool plausible(const float rx[6]) {
+        for (int i = 0; i < 3; i++)
+            if (!std::isfinite(rx[i]) || std::fabs(rx[i]) > 1.0f) return false;
+        if (rx[3] >= 65000.0f && rx[4] >= 65000.0f && rx[5] >= 65000.0f) return true;   // not calibrated
+        for (int i = 3; i < 6; i++)
+            if (!std::isfinite(rx[i]) || std::fabs(rx[i]) > 20.0f) return false;
         return true;
     }
 
@@ -131,10 +157,16 @@ public:
 
     // Clamp |F_cmd| to F_max, send it, update X/V, then reset F_cmd to zero.
     bool render_F_cmd() {
-        const float n = std::sqrt(F_cmd[0] * F_cmd[0] + F_cmd[1] * F_cmd[1] + F_cmd[2] * F_cmd[2]);
-        float s = (n > F_max && n > 0.0f) ? F_max / n : 1.0f;
-        if (!std::isfinite(n)) s = 0.0f;
-        for (int i = 0; i < 3; i++) { F_sent[i] = F_cmd[i] * s; F_cmd[i] = 0.0f; }
+        // |F| in double: three large floats squared would overflow a float
+        const double n = std::sqrt((double)F_cmd[0] * F_cmd[0] + (double)F_cmd[1] * F_cmd[1] + (double)F_cmd[2] * F_cmd[2]);
+        if (!std::isfinite(n)) {
+            // NaN or infinity (e.g. a division by zero): send zero. Scaling would not help, NaN * 0 is still NaN.
+            for (int i = 0; i < 3; i++) { F_sent[i] = 0.0f; F_cmd[i] = 0.0f; }
+            last_error = "non-finite force replaced by zero";
+            return exchange(F_sent);
+        }
+        const double s = (n > F_max && n > 0.0) ? F_max / n : 1.0;
+        for (int i = 0; i < 3; i++) { F_sent[i] = (float)(F_cmd[i] * s); F_cmd[i] = 0.0f; }
         return exchange(F_sent);
     }
 
@@ -186,12 +218,14 @@ public:
         return true;
     }
 
-    // Always leave the device with zero force before closing.
+    // Always leave the device with zero force before closing. The zero command is sent again (up to 3 times)
+    // until the device answers, so one lost frame cannot leave the last force in place.
     void quick_stop() {
         if (!serial_.is_open()) return;
         printf("quick stop entails - (i) zero force, (ii) close the port.\n");
+        fflush(stdout);
         for (int i = 0; i < 3; i++) F_cmd[i] = 0.0f;
-        queryPOS();
+        for (int attempt = 0; attempt < 3 && !queryPOS(); attempt++) {}
         disconnect();
     }
 

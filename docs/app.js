@@ -30,6 +30,8 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const deg = r => r * 180 / Math.PI, rad = d => d * Math.PI / 180;
 const norm3 = a => Math.hypot(a[0], a[1], a[2]);
+const vec3 = v => (Array.isArray(v) && v.length === 3 && v.every(Number.isFinite) ? v : null);   // a usable [x, y, z], or null
+const firstNum = (...v) => { for (const x of v) if (typeof x === "number" && Number.isFinite(x)) return x; return null; };
 
 function h(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
@@ -43,8 +45,11 @@ function h(tag, attrs = {}, ...kids) {
   return e;
 }
 
-let toastTimer;
-function toast(text, kind = "info") {
+let toastTimer, toastHoldUntil = 0;
+// hold (ms): the engine's routine messages ("scenario: wall", "forces off") do not replace this one for that long,
+// so an instruction such as "switch forces on again" stays readable.
+function toast(text, kind = "info", hold = 0) {
+  if (hold) toastHoldUntil = performance.now() + hold;
   let t = $(".toast");
   if (!t) { t = h("div", { class: "toast", role: "status" }); document.body.append(t); }
   t.textContent = text;
@@ -95,15 +100,25 @@ function texString(src, display = true) {
 }
 
 // =========================================================================================== expressions
-// Twin of libs/myEXPR.h: same grammar, same variable names, same error messages.
+// Twin of libs/myEXPR.h: same grammar (plain decimal numbers only: 12  1.5  1.  .5  2e-3, no hex), same variable
+// names, same error messages, the same 32-slot stack limit, and the same results, NaN included (min, max, sign,
+// clamp and pow are written out below exactly as min_js, max_js, pow_js and clamp3 in myEXPR.h).
+// parseExpr also applies the limits that the lab server and engine put on every "expr fx <text>" command
+// (at most 240 characters, plain printable ASCII only), so the page never offers an equation that would be
+// refused on its way to the device.
 const EXPR_VARS = ["x", "y", "z", "vx", "vy", "vz", "t", "xd", "yd", "zd", "kx", "ky", "kz", "bx", "by", "bz"];
 const F1 = ["sin", "cos", "tan", "asin", "acos", "atan", "exp", "log", "sqrt", "abs", "sign", "step", "floor"];
 const F2 = ["min", "max", "atan2", "pow"];
+const EXPR_MAX_LEN = 240;     // the server's whitelist: ^expr (fx|fy|fz) [ -~]{0,240}$
+const EXPR_STACK = 32;        // myEXPR.h STACK: deeper equations are refused ("too deeply nested")
 
 function parseExpr(src) {
+  src = String(src);
+  if (src.length > EXPR_MAX_LEN) return { err: `the equation is longer than ${EXPR_MAX_LEN} characters` };
+  if (/[^ -~]/.test(src)) return { err: "only plain ASCII characters are allowed (no tabs, special spaces or symbols)" };
   let pos = 0, err = null;
   const s = src;
-  const skip = () => { while (pos < s.length && /\s/.test(s[pos])) pos++; };
+  const skip = () => { while (pos < s.length && " \t\n\v\f\r".includes(s[pos])) pos++; };   // C isspace()
   const eat = c => { skip(); if (s[pos] === c) { pos++; return true; } return false; };
   const fail = m => { if (!err) err = `${m} at position ${pos + 1}`; return null; };
   function expr() { let a = term(); if (!a) return null;
@@ -119,6 +134,7 @@ function parseExpr(src) {
     if (pos >= s.length) return fail("equation ends too early");
     const c = s[pos];
     if (c === "(") { pos++; const a = expr(); if (!a) return null; if (!eat(")")) return fail("missing ')'"); return { t: "par", a }; }
+    // digits [. digits]  or  . digits,  then an optional exponent e[+-]digits ("2e" without digits is the number 2)
     const num = /^(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?/.exec(s.slice(pos));
     if (num) { pos += num[0].length; return { t: "num", v: parseFloat(num[0]) }; }
     const id = /^[A-Za-z_]\w*/.exec(s.slice(pos));
@@ -146,8 +162,21 @@ function parseExpr(src) {
   const ast = expr();
   skip();
   if (!ast || pos !== s.length) return { err: err || `unexpected '${s[pos]}' at position ${pos + 1}` };
+  // The engine evaluates the equation on a fixed stack of EXPR_STACK numbers. This is the most it ever holds:
+  // a number or variable needs 1 place; a op b needs a's places, then 1 (a's result) + b's places; f(a, b, c)
+  // needs max(a's, 1 + b's, 2 + c's).
+  const depth = n => n.t === "num" || n.t === "var" ? 1 : n.t === "par" || n.t === "neg" ? depth(n.a)
+    : n.t === "bin" ? Math.max(depth(n.a), 1 + depth(n.b)) : Math.max(...n.args.map((a, i) => i + depth(a)));
+  if (depth(ast) > EXPR_STACK) return { err: "equation is too deeply nested" };
   return { ast };
 }
+// min, max, pow, sign and clamp exactly as myEXPR.h computes them (min_js, max_js, pow_js, clamp3): a NaN input
+// ("not a number", e.g. log of a negative number) gives NaN, which the engine and the simulator turn into zero force.
+// clamp(v, lo, hi) is min(max(v, lo), hi): if lo > hi by mistake, the result is always hi, on the page and on the device.
+const emin = (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? NaN : a < b ? a : b);
+const emax = (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? NaN : a > b ? a : b);
+const epow = (a, b) => (Number.isNaN(b) || (Math.abs(b) === Infinity && Math.abs(a) === 1) ? NaN : Math.pow(a, b));
+const eclamp = (v, lo, hi) => emin(emax(v, lo), hi);
 function evalAst(n, V) {
   switch (n.t) {
     case "num": return n.v;
@@ -155,13 +184,13 @@ function evalAst(n, V) {
     case "par": return evalAst(n.a, V);
     case "neg": return -evalAst(n.a, V);
     case "bin": { const a = evalAst(n.a, V), b = evalAst(n.b, V);
-      return n.op === "+" ? a + b : n.op === "-" ? a - b : n.op === "*" ? a * b : n.op === "/" ? a / b : Math.pow(a, b); }
+      return n.op === "+" ? a + b : n.op === "-" ? a - b : n.op === "*" ? a * b : n.op === "/" ? a / b : epow(a, b); }
     case "call": { const a = n.args.map(x => evalAst(x, V));
       switch (n.name) {
-        case "sign": return Math.sign(a[0]); case "step": return a[0] > 0 ? 1 : 0; case "abs": return Math.abs(a[0]);
-        case "min": return Math.min(a[0], a[1]); case "max": return Math.max(a[0], a[1]); case "pow": return Math.pow(a[0], a[1]);
-        case "clamp": return clamp(a[0], a[1], a[2]);
-        default: return Math[n.name](...a);
+        case "sign": return Number.isNaN(a[0]) ? a[0] : (a[0] > 0) - (a[0] < 0); case "step": return a[0] > 0 ? 1 : 0; case "abs": return Math.abs(a[0]);
+        case "min": return emin(a[0], a[1]); case "max": return emax(a[0], a[1]); case "pow": return epow(a[0], a[1]);
+        case "clamp": return eclamp(a[0], a[1], a[2]);
+        default: return Math[n.name](...a);           // sin cos tan asin acos atan exp log sqrt floor atan2: same as <cmath>
       } }
   }
   return 0;
@@ -169,23 +198,40 @@ function evalAst(n, V) {
 const PREC = { "+": 1, "-": 1, "*": 2, "/": 2, "^": 3 };
 const TEXVAR = { x: "x", y: "y", z: "z", vx: "v_x", vy: "v_y", vz: "v_z", t: "t", xd: "x_d", yd: "y_d", zd: "z_d",
   kx: "k_x", ky: "k_y", kz: "k_z", bx: "b_x", by: "b_y", bz: "b_z" };
-function numStr(v) { if (Number.isInteger(v)) return String(v); return String(+v.toPrecision(6)); }
+function numStr(v) {                               // 1e-7 is shown as 1 x 10^-7, not as "1e-7"
+  if (!Number.isFinite(v)) return "\\infty";
+  const s = Number.isInteger(v) && v < 1e21 ? String(v) : String(+v.toPrecision(6));
+  const m = /^([^e]+)e([-+]?)(\d+)$/.exec(s);
+  return m ? `${m[1]}\\times 10^{${m[2] === "-" ? "-" : ""}${m[3]}}` : s;
+}
+// LaTeX for the parse tree. The brackets the student typed are kept ("par" nodes); extra ones are added only where
+// the LaTeX would otherwise read differently from what is computed: pow(x - xd, 2) is (x - x_d)^2, not x - x_d^2;
+// pow(-x, 2) is (-x)^2, not -x^2; x*-2 is x . (-2), not "x - 2".
 function toTex(n) {
+  const T = toTex, br = m => `\\left(${T(m)}\\right)`;
+  const atom = m => m.t === "var" || m.t === "par" || (m.t === "num" && (m.pi || !/times|infty/.test(numStr(m.v))));
+  const isSum = m => m.t === "bin" && PREC[m.op] === 1;
+  const leadsWithDigit = m => (m.t === "num" && !m.pi) || (m.t === "bin" && m.op !== "/" && leadsWithDigit(m.a)) ||
+    (m.t === "call" && m.name === "pow" && atom(m.args[0]) && leadsWithDigit(m.args[0]));
   switch (n.t) {
     case "num": return n.pi ? "\\pi" : numStr(n.v);
     case "var": return TEXVAR[n.name];
-    case "par": return `\\left(${toTex(n.a)}\\right)`;
-    case "neg": return `-${toTex(n.a)}`;
+    case "par": return br(n.a);
+    case "neg": return n.a.t === "neg" || isSum(n.a) ? `-${br(n.a)}` : `-${T(n.a)}`;
     case "bin":
-      if (n.op === "/") return `\\frac{${toTex(n.a)}}{${toTex(n.b)}}`;
-      if (n.op === "^") return `{${toTex(n.a)}}^{${toTex(n.b)}}`;
-      if (n.op === "*") return `${toTex(n.a)}\\,${toTex(n.b)}`;
-      return `${toTex(n.a)} ${n.op} ${toTex(n.b)}`;
+      if (n.op === "/") return `\\frac{${T(n.a)}}{${T(n.b)}}`;
+      if (n.op === "^") return `{${atom(n.a) || (n.a.t === "call" && n.a.name !== "pow") ? T(n.a) : br(n.a)}}^{${T(n.b)}}`;
+      if (n.op === "*") {
+        const A = isSum(n.a) ? br(n.a) : T(n.a);
+        const B = n.b.t === "neg" || isSum(n.b) ? br(n.b) : T(n.b);
+        return A + (n.b.t === "neg" || leadsWithDigit(n.b) ? " \\cdot " : "\\,") + B;   // 2*3 is 2 . 3, not "23"
+      }
+      return `${T(n.a)} ${n.op} ${n.b.t === "neg" || isSum(n.b) ? br(n.b) : T(n.b)}`;   // a - (-b), a - (b - c)
     case "call": {
-      const a = n.args.map(toTex);
+      const a = n.args.map(T);
       if (n.name === "sqrt") return `\\sqrt{${a[0]}}`;
       if (n.name === "abs") return `\\left|${a[0]}\\right|`;
-      if (n.name === "pow") return `{${a[0]}}^{${a[1]}}`;
+      if (n.name === "pow") return `{${atom(n.args[0]) ? a[0] : br(n.args[0])}}^{${a[1]}}`;
       if (["sin", "cos", "tan", "exp", "log", "min", "max"].includes(n.name)) return `\\${n.name}\\left(${a.join(",\\ ")}\\right)`;
       return `\\operatorname{${n.name}}\\left(${a.join(",\\ ")}\\right)`;
     }
@@ -194,20 +240,42 @@ function toTex(n) {
 }
 const CPPVAR = { x: "x.x()", y: "x.y()", z: "x.z()", vx: "v.x()", vy: "v.y()", vz: "v.z()", t: "t",
   xd: "s.x_d.x()", yd: "s.x_d.y()", zd: "s.x_d.z()", kx: "s.k.x()", ky: "s.k.y()", kz: "s.k.z()", bx: "s.b.x()", by: "s.b.y()", bz: "s.b.z()" };
+// C++ for the parse tree, written so that it compiles with any compiler and computes what the engine computes for
+// ordinary numbers: every number is a double literal (so 1/2 is 0.5, never integer division), pi is written out
+// (M_PI is not standard C++ and is missing on MSVC), every minus sign gets its own brackets (so --x never becomes
+// the C++ decrement operator) and the brackets the student typed are kept. (Only NaN can come out differently:
+// std::min and std::max do not pass a NaN on the way myEXPR.h does.)
+function cppNum(v) {
+  if (!Number.isFinite(v)) return "HUGE_VAL";       // e.g. 1e999: myEXPR.h (strtod) also reads it as infinity
+  const s = String(v);                               // shortest exact form: 0.5, 300, 1e-7, 1e+21
+  return /[.eE]/.test(s) ? s : s + ".0";
+}
 function toCpp(n) {
+  const C = toCpp;
   switch (n.t) {
-    case "num": return n.pi ? "M_PI" : (Number.isInteger(n.v) ? n.v + ".0" : String(n.v));
+    case "num": return n.pi ? "3.14159265358979323846" : cppNum(n.v);
     case "var": return CPPVAR[n.name];
-    case "par": return `(${toCpp(n.a)})`;
-    case "neg": return `-${toCpp(n.a)}`;
-    case "bin": return n.op === "^" ? `std::pow(${toCpp(n.a)}, ${toCpp(n.b)})` : `${toCpp(n.a)} ${n.op} ${toCpp(n.b)}`;
+    case "par": return `(${C(n.a)})`;
+    case "neg": return `(-${C(n.a)})`;
+    case "bin": {
+      if (n.op === "^") return `std::pow(${C(n.a)}, ${C(n.b)})`;
+      // The parser never puts a + or - directly under a * or / (that needs typed brackets, which are kept),
+      // but bracket anyway so the C++ can never mean something else.
+      const low = (m, right) => m.t === "bin" && m.op !== "^" && (right ? PREC[m.op] <= PREC[n.op] : PREC[m.op] < PREC[n.op]);
+      const A = low(n.a, false) ? `(${C(n.a)})` : C(n.a);
+      // MSVC refuses a division of constants by zero, such as 1.0 / 0.0 (error C2124). a / 0 is a times infinity
+      // in IEEE arithmetic (0 / 0 and 0 * infinity are both NaN), so write it that way.
+      const konst = m => m.t === "num" || ((m.t === "par" || m.t === "neg") && konst(m.a)) || (m.t === "bin" && konst(m.a) && konst(m.b));
+      if (n.op === "/" && konst(n.a) && konst(n.b) && evalAst(n.b, {}) === 0) return `${A} * ${Object.is(evalAst(n.b, {}), -0) ? "(-HUGE_VAL)" : "HUGE_VAL"}`;
+      return `${A} ${n.op} ${low(n.b, true) ? `(${C(n.b)})` : C(n.b)}`;
+    }
     case "call": {
-      const a = n.args.map(toCpp);
+      const a = n.args.map(C);
       if (n.name === "step") return `(${a[0]} > 0.0 ? 1.0 : 0.0)`;
-      if (n.name === "sign") return `double((${a[0]} > 0) - (${a[0]} < 0))`;
-      if (n.name === "clamp") return `std::clamp(${a.join(", ")})`;
-      if (n.name === "min" || n.name === "max") return `std::${n.name}(${a.join(", ")})`;
-      return `std::${n.name}(${a.join(", ")})`;
+      if (n.name === "sign") return `double((${a[0]} > 0.0) - (${a[0]} < 0.0))`;
+      if (n.name === "clamp") return `std::min(std::max(${a[0]}, ${a[1]}), ${a[2]})`;   // = clamp(v, lo, hi), also when lo > hi
+      if (n.name === "abs") return `std::fabs(${a[0]})`;
+      return `std::${n.name}(${a.join(", ")})`;      // sin cos ... floor, min max atan2 pow
     }
   }
   return "0.0";
@@ -221,6 +289,9 @@ function R_from_rpy([r, p, y]) {          // R = Rz(yaw) Ry(pitch) Rx(roll), ret
           [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
           [-sp, cp * sr, cp * cr]];
 }
+// An angle in (-pi, pi]: the engine stores roll, pitch and yaw targets this way, so a typo such as 900 degrees
+// never turns the frame round and round for seconds.
+const wrapPi = a => { let r = a % (2 * Math.PI); if (r > Math.PI) r -= 2 * Math.PI; else if (r <= -Math.PI) r += 2 * Math.PI; return r; };
 const mul = (R, a) => [0, 1, 2].map(i => R[i][0] * a[0] + R[i][1] * a[1] + R[i][2] * a[2]);
 const mulT = (R, a) => [0, 1, 2].map(i => R[0][i] * a[0] + R[1][i] * a[1] + R[2][i] * a[2]);
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -244,6 +315,8 @@ function forceOf(s, x, v, t) {             // s = {kind, xd, rpy(rad), k, b, ast
 
 // =========================================================================================== local simulator
 // Twin of lab/engine/haply_lab_engine.cpp (simulator mode) for the GitHub Pages copy of the console.
+// Same commands, same rate limits, and the same force pipeline every 1 ms:
+//   F = equation  ->  not finite? zero  ->  |F| capped at the force limit in use  ->  times the fade-in (0..1 over 1 s)
 class LocalSim {
   constructor() {
     this.t0 = performance.now() / 1000; this.tl = 0;
@@ -251,26 +324,53 @@ class LocalSim {
     this.scn = { kind: "free", xd: [0, 0, 0], rpy: [0, 0, 0], k: [0, 0, 0], b: [0, 0, 0], ast: {} };
     this.tgt = { xd: [0, 0, 0], rpy: [0, 0, 0], k: [0, 0, 0], b: [0, 0, 0] };
     this.src = { fx: "", fy: "", fz: "" };
-    this.fmax = 2; this.on = false; this.ramp = 0; this.msg = "simulator: drag in the views to move the virtual hand"; this.msg_id = 1;
+    this.fmax = 2; this.fmaxNow = 2;           // the force limit asked for, and the one in use (rises at most 2 N/s)
+    this.on = false; this.ramp = 0; this.msg = "simulator: drag in the views to move the virtual hand"; this.msg_id = 1;
     this.drag = null; this.dragUntil = 0; this.rec = null; this.recs = []; this.lastFile = "";
   }
   setMsg(m) { this.msg = m; this.msg_id++; }
   handle(c) {
     const p = c.split(" ");
-    if (p[0] === "forces") { this.on = p[1] === "1"; this.ramp = 0; this.setMsg(this.on ? "forces ON (fading in over 1 s)" : "forces off"); }
+    if (p[0] === "forces") {
+      const on = p[1] === "1";
+      if (on && !this.on) { this.ramp = 0; this.setMsg("forces ON (fading in over 1 s)"); }   // already on: no restart of the fade-in
+      if (!on && this.on) this.setMsg("forces off");
+      this.on = on;
+    }
     else if (p[0] === "set") {
-      if (p[1] === "kind") { if (this.scn.kind !== p[2]) { this.scn.kind = p[2]; this.ramp = 0; this.setMsg("scenario: " + p[2]); } }
-      else if (p[1] === "fmax") this.fmax = clamp(+p[2], 0, 4);
+      if (p[1] === "kind") {
+        if (!["free", "impedance", "wall", "custom"].includes(p[2])) { this.setMsg(`unknown scenario '${p[2]}'`); return; }
+        if (this.scn.kind !== p[2]) { this.scn.kind = p[2]; this.ramp = 0; this.setMsg("scenario: " + p[2]); }
+      }
+      else if (p[1] === "fmax") {
+        const f = +p[2];
+        if (!Number.isFinite(f)) { this.setMsg("'set fmax' needs a number"); return; }
+        this.fmax = clamp(f, 0, 4);
+        if (this.fmax < this.fmaxNow) this.fmaxNow = this.fmax;       // a lower limit applies at once
+      }
       else { const v = p.slice(2, 5).map(Number);
+        if (v.length !== 3 || !v.every(Number.isFinite)) { this.setMsg(`'set ${p[1]}' needs three numbers`); return; }
         if (p[1] === "xd") this.tgt.xd = v.map(a => clamp(a, -0.3, 0.3));
-        if (p[1] === "rpy") this.tgt.rpy = v;
-        if (p[1] === "k") this.tgt.k = v.map(a => clamp(a, 0, 1000));
-        if (p[1] === "b") this.tgt.b = v.map(a => clamp(a, 0, 15)); }
+        else if (p[1] === "rpy") this.tgt.rpy = v.map(wrapPi);
+        else if (p[1] === "k") this.tgt.k = v.map(a => clamp(a, 0, 1000));
+        else if (p[1] === "b") this.tgt.b = v.map(a => clamp(a, 0, 15));
+        else this.setMsg(`unknown parameter '${p[1]}'`); }
     } else if (p[0] === "expr") {
-      const axis = p[1], text = p.slice(2).join(" ").trim();
-      if (!text || text === "0") { delete this.scn.ast[axis]; this.src[axis] = ""; return; }
+      const axis = p[1], text = p.slice(2).join(" ").replace(/^ +/, "");
+      if (!["fx", "fy", "fz"].includes(axis)) { this.setMsg("expr needs fx, fy or fz"); return; }
+      if (!text || text === "0") {                 // "0" clears the equation; the fade-in restarts only if that changed it
+        if (this.src[axis]) { delete this.scn.ast[axis]; this.src[axis] = ""; if (this.scn.kind === "custom") this.ramp = 0; }
+        return;
+      }
+      if (text === this.src[axis]) return;         // the same equation again: nothing changes, no new fade-in
       const r = parseExpr(text);
-      if (r.err) { this.setMsg(axis + ": " + r.err); return; }
+      if (r.err) {                                 // like the engine: never keep running an older equation than the
+        const wasOn = this.scn.kind === "custom" && this.on;    // one the page shows: this axis becomes 0, and if
+        delete this.scn.ast[axis]; this.src[axis] = "";          // it was driving the device, forces switch off
+        if (wasOn) { this.on = false; this.ramp = 0; }
+        this.setMsg((wasOn ? "forces off: " : "") + axis + " error: " + r.err);
+        return;
+      }
       this.scn.ast[axis] = r.ast; this.src[axis] = text; this.setMsg(axis + " = " + text);
       if (this.scn.kind === "custom") this.ramp = 0;
     } else if (p[0] === "rec") {
@@ -301,10 +401,16 @@ class LocalSim {
     while (n-- > 0) {
       this.tl += dt; const t = this.tl, s = this.scn;
       s.xd = mv(s.xd, this.tgt.xd, 0.1 * dt); s.k = each(s.k, this.tgt.k, 2000 * dt); s.b = each(s.b, this.tgt.b, 30 * dt); s.rpy = each(s.rpy, this.tgt.rpy, dt);
+      this.fmaxNow = this.fmax < this.fmaxNow ? this.fmax : Math.min(this.fmax, this.fmaxNow + 2 * dt);
       const r = forceOf(s, this.x, this.v, t); this.e = r.e;
       let F = [0, 0, 0];
-      if (this.on) { this.ramp = Math.min(1, this.ramp + dt); F = r.F.map(f => f * this.ramp); const m = norm3(F);
-        if (!Number.isFinite(m)) F = [0, 0, 0]; else if (m > this.fmax) F = F.map(f => f * this.fmax / m); } else this.ramp = 0;
+      if (this.on) {
+        this.ramp = Math.min(1, this.ramp + dt);
+        // cap first, fade second: then the fade-in really takes 1 s, however large the equation's force is
+        F = r.F.slice(); const m = norm3(F);
+        if (!Number.isFinite(m)) F = [0, 0, 0]; else if (m > this.fmaxNow) F = F.map(f => f * this.fmaxNow / m);
+        F = F.map(f => f * this.ramp);
+      } else this.ramp = 0;
       if (t < this.dragUntil && this.drag) this.hand = mv(this.hand, this.drag, 0.5 * dt);
       else { const w = 2 * Math.PI * 0.12; this.hand = mv(this.hand, [0.04 * Math.sin(w * t), 0.03 * Math.sin(2 * w * t), 0.02 * Math.cos(w * t)], 0.1 * dt); }
       const a = [0, 1, 2].map(i => (150 * (this.hand[i] - this.x[i]) - 6 * this.v[i] + F[i]) / 0.15);
@@ -317,21 +423,38 @@ class LocalSim {
     return { t: this.tl, x: this.x, v: this.v, f: this.F, e: this.e, cal: true, connected: true, sim: true, on: this.on, ramp: this.ramp,
       hz: 1000, rt_us: 0, err: 0, rec: !!this.rec, rec_s: this.rec ? this.tl - this.rec.t0 : 0, rec_label: this.rec ? this.rec.label : "",
       last_file: this.lastFile, dev: "browser simulator", msg: this.msg, msg_id: this.msg_id,
-      par: { kind: this.scn.kind, xd: this.tgt.xd, rpy: this.tgt.rpy, k: this.tgt.k, b: this.tgt.b, fmax: this.fmax, xd_now: this.scn.xd, k_now: this.scn.k, ...this.src },
+      par: { kind: this.scn.kind, xd: this.tgt.xd, rpy: this.tgt.rpy, k: this.tgt.k, b: this.tgt.b, fmax: this.fmax,
+        xd_now: this.scn.xd, k_now: this.scn.k, rpy_now: this.scn.rpy, fmax_now: this.fmaxNow, ...this.src },
       control: { holder: "you", you: true, watching: 1, names: [] } };
   }
 }
 
 // =========================================================================================== connection
 const params = new URLSearchParams(location.search);
-if (params.get("key")) { store.set("key", params.get("key")); }
 const VIEW_TV = params.get("view") === "tv";
-if (params.get("key") && !VIEW_TV) { params.delete("key"); history.replaceState(null, "", location.pathname + (params.toString() ? "?" + params : "") + location.hash); }
-const KEY = () => store.get("key", "");
-const CLIENT = sessionStorage.getItem("myhaply.client") || (() => { const c = Math.random().toString(36).slice(2, 12); sessionStorage.setItem("myhaply.client", c); return c; })();
+const URL_KEY = params.get("key") || "";
+// A ?key=... link is used for this page and removed from the address bar. connect() asks the server what kind of
+// key it is: a lab (control) key is remembered as this browser's key; a watch-only key is remembered separately
+// and never replaces a lab key already kept here (an instructor testing a watch link keeps driving rights).
+// The big-screen view (?view=tv) uses its key for that page only.
+if (URL_KEY && !VIEW_TV) {
+  params.delete("key"); history.replaceState(null, "", location.pathname + (params.toString() ? "?" + params : "") + location.hash);
+}
+const KEY = () => URL_KEY || store.get("key", "") || store.get("viewkey", "");
+// A new client id for every page load. (It used to be kept in sessionStorage, but browsers copy that into a
+// duplicated tab: both tabs then counted as the driver, and closing one of them no longer stopped the forces.)
+const CLIENT = (() => {
+  try { const b = new Uint8Array(8); crypto.getRandomValues(b); return Array.from(b, x => x.toString(16).padStart(2, "0")).join(""); }
+  catch { return Math.random().toString(36).slice(2, 12) + Date.now().toString(36); }
+})();
 
-const app = { mode: "connecting", hello: null, S: null, sim: null, lastMsgId: -1, es: null, files: null };
+const app = { mode: "connecting", hello: null, S: null, sim: null, lastMsgId: -1, es: null, files: null,
+  lastStateAt: 0, streamStart: 0, lastPingOk: 0,     // to notice a lost connection
+  exprSent: {}, exprSentAt: {}, exprError: {},       // the equations last sent to the engine, and the ones it refused
+  pendingTry: null };                                 // a Try-it link waiting for "Take control"
 const live = () => app.mode === "live";
+// A watch-only link (the lab's "view key"): watch, read the code, press Stop forces, but never drive.
+const viewOnly = () => live() && !!app.hello && app.hello.role === "view";
 
 async function api(path, body) {
   const opt = { headers: { "X-Lab-Key": KEY() } };
@@ -348,74 +471,170 @@ async function connect() {
     if (r.status === 403) { app.mode = "needkey"; return; }
     if (!r.ok) throw new Error("no server");
     app.hello = await r.json(); app.mode = "live";
+    if (URL_KEY && !VIEW_TV) store.set(app.hello.role === "control" ? "key" : "viewkey", URL_KEY);
   } catch { app.mode = "sim"; }
 }
 
 function startStream() {
+  app.streamStart = performance.now();
   if (live()) {
     const open = () => {
       app.es = new EventSource("api/stream?key=" + encodeURIComponent(KEY()) + "&client=" + CLIENT);
-      app.es.onmessage = ev => { try { onState(JSON.parse(ev.data)); } catch {} };
+      app.es.onmessage = ev => {
+        let s; try { s = JSON.parse(ev.data); } catch { return; }
+        app.lastStateAt = performance.now();
+        onState(s);
+      };
       app.es.onerror = () => { app.es.close(); setTimeout(open, 1500); };
     };
     open();
-    setInterval(() => api("ping", {}).then(c => { if (app.S) app.S.control = c; renderChips(); }).catch(() => {}), 400);
+    setInterval(() => api("ping", {}).then(c => { app.lastPingOk = performance.now(); if (app.S) app.S.control = c; noteControl(); renderChips(); }).catch(() => {}), 400);
+    setInterval(watchConnection, 300);
   } else {
     app.sim = new LocalSim();
-    presetCommands().forEach(c => app.sim.handle(c));      // start the simulator with the page's saved settings
+    send(presetCommands(true));                            // start the simulator with the page's saved settings
     const tick = () => { onState(app.sim.step()); requestAnimationFrame(tick); };
     requestAnimationFrame(tick);
   }
 }
+// No stream message for 1.5 s, or a state the engine sent more than 1 s ago (the server keeps re-sending the
+// last one, about once a second, with its "age"): the page no longer knows what the device is doing.
+function staleInfo() {
+  if (!live()) return null;
+  const quiet = (performance.now() - Math.max(app.lastStateAt, app.streamStart)) / 1000;
+  if (quiet > 1.5) return { why: "server", secs: quiet };
+  const age = app.S && app.S.age;
+  if (typeof age === "number" && age > 1) return { why: "engine", secs: age };
+  return null;
+}
 
+// The lab server's whitelist (CMD_PATTERNS in lab/haply_lab.py), checked here as well: the server refuses the
+// whole batch if one command does not match, so a bad value (say, Infinity from a broken link) must not leave the page.
+const FLOAT = String.raw`[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?`;
+const CMD_OK = [/^forces [01]$/, /^set kind (free|impedance|wall|custom)$/, new RegExp(`^set (xd|rpy|k|b) ${FLOAT} ${FLOAT} ${FLOAT}$`),
+  new RegExp(`^set fmax ${FLOAT}$`), /^expr (fx|fy|fz) [ -~]{0,240}$/, /^rec (start [A-Za-z0-9 _-]{0,60}|stop)$/,
+  new RegExp(`^sim ${FLOAT} ${FLOAT} ${FLOAT}$`)];
+// Sends commands to the engine (or to the browser simulator). Resolves to true only if they were all accepted,
+// so a caller can tell, for example "only switch forces on if the new settings arrived".
 function send(cmds) {
   if (!Array.isArray(cmds)) cmds = [cmds];
-  if (!live()) { cmds.forEach(c => app.sim.handle(c)); return Promise.resolve(); }
-  return api("cmd", { cmds }).catch(e => toast(e.message, "bad"));
+  const failed = m => { app.lastSendError = m; toast(m, "bad"); return false; };
+  const bad = cmds.find(c => typeof c !== "string" || !CMD_OK.some(re => re.test(c)));
+  if (bad !== undefined) return Promise.resolve(failed("not sent, this command is not allowed: " + bad));
+  const sent = () => {                                   // remember which equations the engine has now
+    cmds.forEach(c => { const m = /^expr (f[xyz]) (.*)$/.exec(c); if (m) { app.exprSent[m[1]] = m[2]; app.exprSentAt[m[1]] = performance.now(); } });
+    return true;
+  };
+  if (!live()) { cmds.forEach(c => app.sim.handle(c)); return Promise.resolve(sent()); }
+  return api("cmd", { cmds }).then(sent, e => failed(e.message));
+}
+// "Stop forces": anyone may press it, the driver or a watcher. POST api/stop takes the lab key or the watch-only
+// key and needs no control, so the instructor can always stop a student's experiment from another laptop.
+async function stopForces() {
+  toastHoldUntil = 0;
+  if (!live()) { app.sim.handle("forces 0"); return; }
+  try { await api("stop", {}); toast("Stop sent: the forces switch off.", "good"); }
+  catch (e) {
+    if (e.status === 404 && inControl() && (await send("forces 0"))) return;   // an older lab server without api/stop
+    toast(`The stop did not reach the lab (${e.message}). If the handle still pushes, switch off the motor power.`, "bad");
+  }
 }
 const inControl = () => !live() || !!(app.S && app.S.control && app.S.control.you);
 const myName = () => ($("#my-name").value || "").trim();
 
 // =========================================================================================== state + chips
 const trail = { top: [], n: 0 };
+const BAD_MSG = /off:|cannot|lost|unknown|error|not allowed|refused|rejected/i;
 function onState(s) {
+  const prev = app.S;
   app.S = s;
   if (s.msg_id !== undefined && s.msg_id !== app.lastMsgId) {
-    if (app.lastMsgId >= 0 && s.msg) toast(s.msg, /off:|cannot|lost|unknown|error/i.test(s.msg) ? "bad" : "info");
+    if (app.lastMsgId >= 0 && s.msg) {
+      // "fx error: ..." (or "forces off: fx error: ...") is the engine refusing an equation: that axis is then 0;
+      // "fx = ..." is it taking one
+      const ex = /^(?:forces off: )?(f[xyz])( error: | = )/.exec(s.msg), refused = !!ex && ex[2] === " error: ";
+      if (refused) app.exprError[ex[1]] = s.msg; else if (ex) delete app.exprError[ex[1]];
+      const bad = refused || BAD_MSG.test(s.msg);
+      if (bad || performance.now() > toastHoldUntil) toast(s.msg, bad ? "bad" : "info");
+      if (/^forces off:/.test(s.msg)) app._forceConfirmed = false;      // after a safety cut-off, the checklist again
+    }
     app.lastMsgId = s.msg_id;
   }
+  // the device came or went, or lost its calibration: the next "switch on" asks for the checklist again
+  if (prev && (prev.connected !== s.connected || prev.released !== s.released || (prev.cal && !s.cal))) app._forceConfirmed = false;
   if (s.x && s.cal) { trail.top.push(s.x.slice()); if (trail.top.length > 150) trail.top.shift(); }
+  noteControl();
+  resolvePendingHere(s);
   if (s.par) adoptEngineParams(s.par);
   frame();
+}
+// On every state and ping: notice when this page gains or loses control.
+function noteControl() {
+  if (!live()) return;
+  const you = !!(app.S && app.S.control && app.S.control.you);
+  if (app._wasYou && !you) {
+    if (performance.now() - (app._tookAt || 0) < 1500) return;  // a state or ping sent just before our "take": ignore it
+    app._forceConfirmed = false; app._adopted = false;          // whoever drives next starts with the checklist again
+    if (!app._releasing) toast("You are no longer in control of the device (control was released, or this page was quiet for 3 s).", "bad", 4000);
+  }
+  if (app._wasYou !== you) { app._releasing = false; app._wasYou = you; renderPresetUI(); }
+  checkPendingTry();
 }
 
 let lastChips = 0;
 function renderChips() {
   const s = app.S || {};
   const c = s.control || {};
+  const st = staleInfo();
   const chips = [];
   const chip = (cls, text) => chips.push(h("span", { class: "chip " + cls }, h("i"), text));
+  if (st) chip("bad", st.why === "server" ? "connection lost" : "no data from the engine");
   if (app.mode === "needkey") chip("bad", "needs the lab key");
   else if (!live()) chip("warn", "simulator (no device)");
   else if (s.sim) chip("warn", "lab engine: simulator");
   else if (s.released) chip("warn", "device released to a program");
   else chip(s.connected ? "good" : "bad", s.connected ? "Inverse3 #" + s.dev : "no device");
-  if (live() && s.connected && !s.sim) chip(s.cal ? "good" : "bad", s.cal ? "calibrated" : "NOT calibrated");
-  chip(s.on ? "good" : "", s.on ? `forces ON${s.ramp < 1 ? " " + Math.round(s.ramp * 100) + "%" : ""}` : "forces off");
-  if (s.hz) chip("", Math.round(s.hz) + " Hz");
+  if (live() && s.connected && !s.sim && !s.released) chip(s.cal ? "good" : "bad", s.cal ? "calibrated" : "NOT calibrated");
+  if (st) chip("bad", "forces: unknown");
+  else chip(s.on ? "good" : "", s.on ? `forces ON${s.ramp < 1 ? " " + Math.round(s.ramp * 100) + "%" : ""}` : "forces off");
+  if (s.hz && !st) chip("", Math.round(s.hz) + " Hz");
   if (live()) chip(c.you ? "good" : c.holder ? "warn" : "", c.you ? "you are in control" : c.holder ? "in control: " + c.holder : "nobody in control");
+  if (viewOnly()) chip("", "watch-only link");
   if (live() && c.watching) chip("", c.watching + " watching");
   if (s.rec) chip("rec", "REC " + fmt(s.rec_s, 1) + " s");
+  if (live() && s.auth === false) chip("warn", "engine without a command token (developer mode)");
+  if (typeof s.space_mb === "number" && s.space_mb >= 0 && s.space_mb < 500) chip(s.space_mb < 100 ? "bad" : "warn", `disk: ${Math.round(s.space_mb)} MB free`);
+  if (live() && !st && app.lastPingOk && performance.now() - app.lastPingOk > 2500) chip("bad", "server not answering");
   $("#chips").replaceChildren(...chips);
   const btn = $("#control-btn");
-  btn.classList.toggle("hidden", !live());
+  btn.classList.toggle("hidden", !live() || viewOnly());
   btn.textContent = c.you ? "Release control" : "Take control";
   btn.classList.toggle("primary", !c.you);
+  // Stop forces: for everyone, whenever forces are on, and whenever the page cannot tell (connection lost)
+  $("#btn-stop").classList.toggle("hidden", !(s.on || st));
+}
+function renderConnBanner() {
+  const st = staleInfo(), b = $("#conn-banner");
+  b.classList.toggle("hidden", !st);
+  if (!st) return;
+  const t = st.secs > 90 ? "more than a minute" : Math.round(st.secs) + " s";
+  b.textContent = (st.why === "server" ? `Connection lost: no news from the lab server for ${t}.` : `Connection lost: the lab engine has sent nothing for ${t}.`) +
+    " Everything on this page is out of date, and forces cannot be switched on. If the handle pushes, press Stop forces, or switch off the motor power.";
+}
+// Three times a second in the lab. When the stream stops, nothing else redraws the page, so this does.
+function watchConnection() {
+  const st = staleInfo();
+  if (st || !!st !== app._wasStale) { renderChips(); if (app.S && currentTab === "play") renderForceButton(app.S); }
+  app._wasStale = !!st;
+  renderConnBanner();
+  checkPendingTry(); renderPendingTry();
 }
 
+$("#btn-stop").addEventListener("click", stopForces);
 $("#control-btn").addEventListener("click", async () => {
   const c = (app.S && app.S.control) || {};
-  if (c.you) { await api("control", { action: "release" }).catch(e => toast(e.message, "bad")); return; }
+  if (c.you) { app._releasing = true; await api("control", { action: "release" }).catch(e => { app._releasing = false; toast(e.message, "bad"); }); return; }
+  if (viewOnly()) { toast("This is a watch-only link. To drive the device, open the full lab link from your instructor.", "bad"); return; }
   if (!myName()) {
     const inp = h("input", { type: "text", placeholder: "First name", maxlength: "40" });
     const ok = await modal("Your name", h("div", {}, h("p", { class: "note", text: "Shown to others while you drive the device." }), inp),
@@ -423,20 +642,35 @@ $("#control-btn").addEventListener("click", async () => {
     if (!ok || !inp.value.trim()) return;
     $("#my-name").value = inp.value.trim(); store.set("name", inp.value.trim());
   }
-  try {
-    await api("control", { action: "take" });
-    if (app.S) app.S.control = { ...(app.S.control || {}), you: true };
-    if (app._pendingTry) {                               // load what a Try-it link set up
-      app._pendingTry = false; app._adopted = true;
-      await send(presetCommands());
-      toast(`You are in control. Loaded: ${PRESETS[P.preset].label}. Switch forces on when you are holding the handle.`);
-    } else toast("You are in control. Others can watch.");
-    renderPresetUI();
+  const pt = app.pendingTry;
+  try { await api("control", { action: "take" }); }
+  catch (e) { toast(e.status === 409 ? `${(e.body && e.body.holder) || "Someone"} is driving the device right now. Ask them to release control.` : e.message, "bad"); return; }
+  if (app.S) app.S.control = { ...(app.S.control || {}), you: true, holder: myName() };
+  app._wasYou = true; app._tookAt = performance.now();
+  app._forceConfirmed = false;                       // every turn at the device starts with the safety checklist
+  app.exprSent = {}; app.exprSentAt = {};            // send the whole scenario once, whatever this page sent before
+  app.pendingTry = null;
+  renderPresetUI(); renderPendingTry();
+  // Forces still on from the previous driver: you have not confirmed the checklist, so they go off first.
+  let off = "";
+  if ((app.S || {}).on && (await send("forces 0"))) off = " Forces were still on from the previous driver, so they were switched off.";
+  if (pt && performance.now() - pt.at <= TRY_WAIT_MS) {          // load what a Try-it link set up
+    const { next, label, note, herePending } = tryToP(pt);
+    Object.assign(P, next);
+    app.xdHerePending = herePending;
+    app._adopted = true; userEditedAt = performance.now();
+    store.set("P", P); renderEquation(); renderPresetUI();
+    if (P.preset === "custom") syncEqInputs();
+    if (await send(presetCommands(true))) toast(`You are in control. Loaded: ${label}.${note}${off} Switch forces on when you are holding the handle.`, note ? "bad" : "info", 5000);
+    else { app._adopted = false; toast(`You are in control, but the device did not accept “${label}” (${app.lastSendError}). It keeps its previous settings, which this page shows again in a few seconds.`, "bad", 5000); }
+  } else {
+    app._adopted = false;                            // show what the engine is running now
+    toast("You are in control. Others can watch." + off, "info", off ? 5000 : 0);
   }
-  catch (e) { toast(e.status === 409 ? `${e.body && e.body.holder} is driving the device right now. Ask them to release control.` : e.message, "bad"); }
 });
 $("#my-name").value = store.get("name", "");
-$("#my-name").addEventListener("change", e => store.set("name", e.target.value.trim()));
+// a new name means a new person at the device, who confirms the checklist for themselves
+$("#my-name").addEventListener("change", e => { store.set("name", e.target.value.trim()); app._forceConfirmed = false; });
 
 // =========================================================================================== tabs + routing
 const TABS = ["start", "play", "experiment", "learn", "code", "eqlab", "report", "terminal", "feedback", "build"];
@@ -470,31 +704,56 @@ const PRESETS = {
   damping:   { label: "Damping field", help: "No spring, only damping: moving fast feels like moving through honey. F = −B v." },
   custom:    { label: "My equation", help: "The force comes from the equations you wrote in the Equation lab." },
 };
-const P = Object.assign({ preset: "free", k: 200, b: 2, fmax: 2, xd: [0, 0, 0], rpy: [0, 0, 0], fx: "-kx*(x - xd) - bx*vx", fy: "-ky*(y - yd) - by*vy", fz: "-kz*(z - zd) - bz*vz" },
-  store.get("P", {}));
+const isPreset = p => typeof p === "string" && Object.prototype.hasOwnProperty.call(PRESETS, p);
+const P_DEFAULT = { preset: "free", k: 200, b: 2, fmax: 2, xd: [0, 0, 0], rpy: [0, 0, 0], fx: "-kx*(x - xd) - bx*vx", fy: "-ky*(y - yd) - by*vy", fz: "-kz*(z - zd) - bz*vz" };
+// The page's settings, kept in this browser. Every value is checked when it is read back, inside the slider
+// ranges: a broken value (from an old version of the page, or a bad link) must never stop the page or reach the device.
+function sanitizeP(p) {
+  p = p && typeof p === "object" ? p : {};
+  const D = P_DEFAULT, n = (v, lo, hi, d) => (typeof v === "number" && Number.isFinite(v) ? clamp(v, lo, hi) : d);
+  const v3 = (v, lo, hi) => (Array.isArray(v) && v.length === 3 ? v.map(x => n(x, lo, hi, 0)) : [0, 0, 0]);
+  const eq = (v, d) => (typeof v === "string" && !parseExpr(v.trim() || "0").err ? v.trim() || "0" : d);
+  return { preset: isPreset(p.preset) ? p.preset : D.preset, k: n(p.k, 0, 800, D.k), b: n(p.b, 0, 10, D.b), fmax: n(p.fmax, 0.5, 4, D.fmax),
+    xd: v3(p.xd, -0.3, 0.3), rpy: v3(p.rpy, -180, 180), fx: eq(p.fx, D.fx), fy: eq(p.fy, D.fy), fz: eq(p.fz, D.fz) };
+}
+const P = sanitizeP(store.get("P", {}));
 let userEditedAt = 0;
 
-function presetCommands() {
+const kindOf = preset => ({ free: "free", wall: "wall", custom: "custom" }[preset] || "impedance");
+const exprText = v => String(v || "").trim() || "0";     // what is sent for one equation box
+const exprNorm = t => (t === "0" ? "" : String(t));       // the engine reports a cleared ("0") equation as ""
+// The page's scenario as engine commands. In "My equation" mode the expr commands go only for equations that
+// changed (or that the engine shows differently): a new equation restarts the fade-in, and dragging a slider must
+// not do that. all = true sends everything: on "Take control" and just before "switch on".
+function presetCommands(all) {
   const K = P.k, B = P.b;
   const kb = { spring: [[K, K, K], [B, B, B]], line: [[K, K, 0], [B, B, 0]], plane: [[0, 0, K], [0, 0, B]], wall: [[0, 0, K], [0, 0, B]],
     damping: [[0, 0, 0], [B, B, B]], custom: [[K, K, K], [B, B, B]], free: [[0, 0, 0], [0, 0, 0]] }[P.preset];
-  const kind = { free: "free", wall: "wall", custom: "custom" }[P.preset] || "impedance";
-  const c = [`set kind ${kind}`, `set k ${kb[0].join(" ")}`, `set b ${kb[1].join(" ")}`,
+  const c = [`set kind ${kindOf(P.preset)}`, `set k ${kb[0].join(" ")}`, `set b ${kb[1].join(" ")}`,
     `set xd ${P.xd.map(v => v.toFixed(5)).join(" ")}`, `set rpy ${P.rpy.map(v => rad(v).toFixed(5)).join(" ")}`, `set fmax ${P.fmax}`];
-  if (P.preset === "custom") ["fx", "fy", "fz"].forEach(a => c.push(`expr ${a} ${P[a] || "0"}`));
+  if (P.preset === "custom") c.push(...exprCommands(all));
   return c;
+}
+function exprCommands(all) {
+  const par = (live() ? app.S && app.S.par : app.sim && app.sim.state().par) || {};
+  return ["fx", "fy", "fz"].filter(a => {
+    const want = exprText(P[a]);
+    if (all || want !== app.exprSent[a]) return true;
+    // sent before, but the engine runs something else (it restarted, or another driver changed it): send it again
+    return typeof par[a] === "string" && exprNorm(par[a]) !== exprNorm(want) && performance.now() - (app.exprSentAt[a] || 0) > 1500;
+  }).map(a => `expr ${a} ${exprText(P[a])}`);
 }
 let sendTimer;
 function pushParams() {
   store.set("P", P); userEditedAt = performance.now();
   renderEquation(); renderPresetUI();
   if (!inControl()) return;
-  clearTimeout(sendTimer); sendTimer = setTimeout(() => send(presetCommands()), 60);
+  // if the server refuses the batch, stop trusting the page's numbers: show the engine's real ones again
+  clearTimeout(sendTimer); sendTimer = setTimeout(async () => { if (!(await send(presetCommands()))) app._adopted = false; }, 60);
 }
 function adoptEngineParams(par) {
   // While someone else drives (or just after taking control) show what the engine is really doing.
   if (!live()) return;                                  // the browser simulator follows the page, not the reverse
-  if (app._pendingTry) return;                          // a Try-it link is waiting for "Take control": keep showing it
   if (inControl() && performance.now() - userEditedAt < 4000) return;
   if (inControl() && app._adopted) return;
   const k = par.k || [0, 0, 0], b = par.b || [0, 0, 0];
@@ -507,8 +766,13 @@ function adoptEngineParams(par) {
   const before = JSON.stringify([P.preset, P.k, P.b, P.fmax, P.xd, P.rpy.map(Math.round), P.fx, P.fy, P.fz]);
   P.preset = preset; P.k = Math.max(...k) || P.k; P.b = Math.max(...b) || (preset === "free" ? P.b : 0); P.fmax = par.fmax || P.fmax;
   P.xd = par.xd || P.xd; P.rpy = (par.rpy || [0, 0, 0]).map(deg);
-  if (par.kind === "custom") ["fx", "fy", "fz"].forEach(a => { if (par[a]) P[a] = par[a]; });
-  if (inControl()) app._adopted = true;
+  // the equations the engine reports are the ones it compiled and runs ("" = cleared, i.e. 0)
+  if (par.kind === "custom") ["fx", "fy", "fz"].forEach(a => { if (typeof par[a] === "string") P[a] = par[a] || "0"; });
+  if (inControl()) {
+    app._adopted = true;
+    // what the engine runs now counts as sent, so the next slider move does not resend (and restart) the equations
+    if (par.kind === "custom") ["fx", "fy", "fz"].forEach(a => { if (typeof par[a] === "string") { app.exprSent[a] = exprText(P[a]); app.exprSentAt[a] = performance.now(); } });
+  }
   if (JSON.stringify([P.preset, P.k, P.b, P.fmax, P.xd, P.rpy.map(Math.round), P.fx, P.fy, P.fz]) !== before) { renderPresetUI(); renderEquation(); }
 }
 
@@ -540,15 +804,29 @@ function buildPlayControls() {
     });
     sl.append(h("div", { class: "slider" }, h("span", { title: s.help || "" }, s.label), inp, val));
   });
-  ["x", "y", "z"].forEach((a, i) => $("#xd-" + a).addEventListener("change", e => { P.xd[i] = (+e.target.value || 0) / 1000; pushParams(); }));
-  $("#btn-xd-here").addEventListener("click", () => { if (app.S && app.S.x) { P.xd = app.S.x.slice(); pushParams(); toast("Target placed at the cursor."); } });
+  ["x", "y", "z"].forEach((a, i) => $("#xd-" + a).addEventListener("change", e => {
+    const v = e.target.value.trim() === "" ? NaN : +e.target.value;
+    if (!Number.isFinite(v)) { e.target.value = Math.round(P.xd[i] * 1000); toast("The target needs a number in millimetres.", "bad"); return; }
+    app.xdHerePending = false;                                    // a target typed by hand wins over a waiting "here"
+    P.xd[i] = clamp(v, -300, 300) / 1000; pushParams();          // the engine keeps x_d within ±300 mm too
+  }));
+  $("#btn-xd-here").addEventListener("click", () => {
+    const s = app.S || {};
+    if (!s.cal || !vec3(s.x)) { toast("The device is not calibrated yet, so there is no cursor position to use.", "bad"); return; }
+    app.xdHerePending = false;
+    P.xd = s.x.map(v => clamp(v, -0.3, 0.3)); pushParams(); toast("Target placed at the cursor.");
+  });
   $("#btn-forces").addEventListener("click", toggleForces);
   $("#btn-center").addEventListener("click", () => { if (app.S) viewState.c = app.S.x.slice(); });
   $("#btn-zoom-in").addEventListener("click", () => (viewState.half = Math.max(0.02, viewState.half / 1.5)));
   $("#btn-zoom-out").addEventListener("click", () => (viewState.half = Math.min(0.4, viewState.half * 1.5)));
   $("#btn-open-code").addEventListener("click", () => { location.hash = "tab=code"; setTimeout(() => openFile("libs/myHAPLY_SCENARIOS.h"), 50); });
-  const tvUrl = live() ? `${location.origin}/?key=${encodeURIComponent(KEY())}&view=tv` : `${location.pathname}?view=tv`;
+  // The big screen only watches, so its link carries the watch-only key (the lab server gives it to key holders).
+  const viewKey = app.hello && app.hello.view_key;
+  const tvUrl = live() ? `${location.origin}/?key=${encodeURIComponent(viewKey || KEY())}&view=tv` : `${location.pathname}?view=tv`;
   $("#lnk-tv").href = tvUrl;
+  $("#btn-viewlink").classList.toggle("hidden", !viewKey);
+  if (viewKey) $("#btn-viewlink").addEventListener("click", e => copy(`${location.origin}/?key=${encodeURIComponent(viewKey)}`, e.currentTarget));
   $("#btn-tv").addEventListener("click", async () => {
     if (!live() || !app.hello || !app.hello.tv) { toast("The lab TV can only be used from the lab console on the Pi.", "bad"); return; }
     const v = await modal("Show this on the lab TV?", h("p", { text: "The TV switches to the Pi's input (HDMI 1) and shows the big-screen view: both views, the equation and the force. Only do this if nobody else is using the TV right now." }),
@@ -572,25 +850,65 @@ function renderPresetUI() {
   $("#btn-xd-here").disabled = !ctl;
 }
 
+// Why forces cannot be switched on right now ("" if they can). The engine checks the same things itself.
+function forcesBlocked(s) {
+  if (viewOnly()) return "This is a watch-only link: you can watch and stop the forces, but not switch them on.";
+  if (!inControl()) return "Take control first (button at the top right).";
+  if (staleInfo()) return "There is no live data from the lab right now, so forces cannot be switched on.";
+  if (live() && !s.sim) {
+    if (s.released) return "The device is released to a terminal program. Press “Give the device back to the console” in the Terminal tab first.";
+    if (!s.connected) return "No device is connected: check the blue USB cable on the Pi, then wait a few seconds.";
+    if (!s.cal) return "Calibrate the device first: rest the cursor on the magnetic dock until the LED changes colour.";
+  }
+  return "";
+}
+// Does the engine run the scenario this page shows? (kind, and in "My equation" mode the three equations)
+function engineMatchesP() {
+  const s = live() ? app.S : app.sim && app.sim.state();
+  const par = s && s.par;
+  if (!par || par.kind === undefined) return true;              // an older engine that does not report its settings
+  if (par.kind !== kindOf(P.preset)) return false;
+  return P.preset !== "custom" || ["fx", "fy", "fz"].every(a => typeof par[a] !== "string" || exprNorm(par[a]) === exprNorm(exprText(P[a])));
+}
+async function engineMatches(ms) {                               // wait up to ms for the state to show it
+  const t0 = performance.now();
+  while (!engineMatchesP()) {
+    if (performance.now() - t0 > ms) return false;
+    await new Promise(r => setTimeout(r, 50));
+  }
+  return true;
+}
 async function toggleForces() {
   const s = app.S || {};
-  if (!inControl()) { toast("Take control first (button at the top right).", "bad"); return; }
-  if (s.on) { send("forces 0"); return; }
-  if (live() && !s.sim) {
-    if (!s.cal) { toast("Calibrate the device first: rest the cursor on the magnetic dock until the LED changes colour.", "bad"); return; }
-    if (!app._forceConfirmed) {
-      const boxes = ["The motor power cable is plugged in (feedback works without it; forces need it).",
-        "I am holding the handle firmly.", "Nobody's face or fingers are near the arms.",
-        "I know: the red button on this page (or closing the page) switches forces off within 2 s."].map(t => h("label", {}, h("input", { type: "checkbox" }), h("span", { text: t })));
-      const body = h("div", {}, ...boxes);
-      const ok = await modal("Before forces go on", body, [{ label: "Cancel", value: false },
-        { label: "Switch forces on", cls: "primary", value: true, check: () => { const all = $$("input", body).every(c => c.checked); if (!all) toast("Tick all four boxes first.", "bad"); return all; } }]);
-      if (!ok) return;
-      app._forceConfirmed = true;
-    }
+  toastHoldUntil = 0;                                            // a new action: the engine's answers may show again
+  if (s.on) { stopForces(); return; }                           // anyone may switch forces off
+  if (app._switchingOn) return;
+  const why = forcesBlocked(s);
+  if (why) { toast(why, "bad"); return; }
+  if (live() && !s.sim && !app._forceConfirmed) {               // asked again every time control is taken
+    const boxes = ["The motor power cable is plugged in (feedback works without it; forces need it).",
+      "I am holding the handle firmly.", "Nobody's face or fingers are near the arms.",
+      "I know: the red “Stop forces” button at the top of the page (or closing the page) switches forces off within 2 s."].map(t => h("label", {}, h("input", { type: "checkbox" }), h("span", { text: t })));
+    const body = h("div", {}, ...boxes);
+    const ok = await modal("Before forces go on", body, [{ label: "Cancel", value: false },
+      { label: "Switch forces on", cls: "primary", value: true, check: () => { const all = $$("input", body).every(c => c.checked); if (!all) toast("Tick all four boxes first.", "bad"); return all; } }]);
+    if (!ok) return;
   }
-  await send(presetCommands());
-  send("forces 1");
+  app._switchingOn = true;
+  try {
+    // First the scenario, and only once it has arrived, "forces 1". Otherwise a refused batch (a bad value) would
+    // switch on whatever the engine still had from before: another student's scenario.
+    const again = () => forcesBlocked(app.S || {});              // things may have changed while we waited
+    if (again()) { toast(again(), "bad"); return; }
+    clearTimeout(sendTimer);                                      // this batch replaces a pending slider update
+    if (!(await send(presetCommands(true)))) { toast(`These settings were not accepted (${app.lastSendError}), so forces stay off.`, "bad"); return; }
+    if (!(await engineMatches(1500))) {
+      const m = (app.S && app.S.msg) || "";
+      toast(`The device has not taken these settings${m ? ` (its last message: “${m}”)` : ""}, so forces stay off.`, "bad"); return;
+    }
+    if (again()) { toast(again(), "bad"); return; }
+    if (await send("forces 1")) app._forceConfirmed = live() && !s.sim;   // until control changes hands or something cuts out
+  } finally { app._switchingOn = false; }
 }
 
 // =========================================================================================== play: views
@@ -620,7 +938,10 @@ function drawView(cv, ax, s) {
   g.fillText("grid: 1 cm", 6 * d, H - 6 * d);
   if (!s || !s.x) return;
   const par = s.par || {};
-  const kind = par.kind || "free", xd = par.xd_now || par.xd || [0, 0, 0], R = R_from_rpy(par.rpy || [0, 0, 0]);
+  // Draw what the force really uses right now: the engine moves x_d (xd_now) and turns the frame (rpy_now) towards
+  // the targets at a limited speed, so the drawn wall or line must not jump ahead of the one you feel.
+  const rpy = vec3(par.rpy_now) || vec3(s.rpy_now) || vec3(par.rpy) || [0, 0, 0];
+  const kind = par.kind || "free", xd = vec3(par.xd_now) || vec3(par.xd) || [0, 0, 0], R = R_from_rpy(rpy);
   const n = [R[0][2], R[1][2], R[2][2]];
   const accent = css("--accent"), f2 = css("--series-2"), muted = css("--text-muted");
   // scenario geometry
@@ -676,7 +997,7 @@ function setupViewInput() {
       const p = (app.S && app.S.x ? app.S.x : [0, 0, 0]).slice(); p[a] = viewState.c[a] + (u - 0.5) * 2 * viewState.half; p[b] = viewState.c[b] - (v - 0.5) * 2 * viewState.half; return p; };
     let down = false;
     cv.addEventListener("pointerdown", ev => {
-      if ($("#chk-place").checked) { if (!inControl()) { toast("Take control first.", "bad"); return; } const p = toWorld(ev); P.xd[a] = p[a]; P.xd[b] = p[b]; pushParams(); return; }
+      if ($("#chk-place").checked) { if (!inControl()) { toast("Take control first.", "bad"); return; } const p = toWorld(ev); P.xd[a] = clamp(p[a], -0.3, 0.3); P.xd[b] = clamp(p[b], -0.3, 0.3); pushParams(); return; }
       down = true; cv.setPointerCapture(ev.pointerId); dragTo(toWorld(ev));
     });
     cv.addEventListener("pointermove", ev => { if (down) dragTo(toWorld(ev)); });
@@ -744,21 +1065,27 @@ function renderReadout(s) {
     ...row("force", "N", F, v => fmt(v, 2), `  |F| = ${fmt(norm3(F), 2)} N`),
     ...row("error e = Rᵀ(x_d − x)", "mm", s.cal && (s.par || {}).kind !== "free" ? s.e : null, mm),
   );
-  const btn = $("#btn-forces");
-  btn.textContent = s.on ? "Forces are ON — switch off" : "Forces are OFF — switch on";
-  btn.className = "btn big forcebtn " + (s.on ? "danger" : "good");
-  btn.disabled = !inControl();
-  $("#force-note").textContent = !inControl() ? "Take control (top right) to change anything. You can still watch." :
-    live() && !s.sim && !s.cal ? "The device is not calibrated: forces cannot go on." :
-    s.on ? `Force limit ${fmt((s.par || {}).fmax || P.fmax, 1)} N. Closing this page also switches forces off within 2 s.` :
-    "Forces fade in over 1 s. Start with small k (100–200 N/m).";
+  renderForceButton(s);
   $("#drag-hint").textContent = live() && !s.sim ? "Move the real handle." : "Drag in a view to move the virtual hand.";
   $("#scale-top").textContent = $("#scale-side").textContent = `±${Math.round(viewState.half * 100)} cm`;
+}
+// The big Forces button: anyone can switch forces off; switching on needs control, live data and a ready device.
+function renderForceButton(s) {
+  const btn = $("#btn-forces"), st = staleInfo(), why = s.on ? "" : forcesBlocked(s), par = s.par || {};
+  btn.textContent = s.on ? "Forces are ON — switch off" : st ? "No live data — forces cannot go on" : "Forces are OFF — switch on";
+  btn.className = "btn big forcebtn " + (s.on ? "danger" : "good");
+  btn.disabled = !s.on && !!why;
+  const lim = firstNum(par.fmax, P.fmax), now = firstNum(par.fmax_now, s.fmax_now);
+  const rising = now !== null && now < lim - 0.05 ? ` (rising to it at 2 N/s, now ${fmt(now, 1)} N)` : "";
+  $("#force-note").textContent = s.on ? (inControl() ? `Force limit ${fmt(lim, 1)} N${rising}. Closing this page also switches forces off within 2 s.`
+      : `Force limit ${fmt(lim, 1)} N${rising}. You are watching: you can still switch the forces off, here or with Stop forces at the top.`) :
+    why ? (inControl() || viewOnly() ? why : "Take control (top right) to change anything. You can still watch, and stop the forces.") :
+    "Forces fade in over 1 s. Start with small k (100–200 N/m).";
 }
 
 function frame() {
   const s = app.S; if (!s) return;
-  if (performance.now() - lastChips > 250) { renderChips(); lastChips = performance.now(); renderStartSteps(); }
+  if (performance.now() - lastChips > 250) { renderChips(); lastChips = performance.now(); renderStartSteps(); renderActiveExpr(); }
   // keep the cursor in view
   if (s.cal && s.x) for (let i = 0; i < 3; i++) if (Math.abs(s.x[i] - viewState.c[i]) > viewState.half * 0.8) viewState.c[i] = s.x[i];
   if (currentTab === "play" || VIEW_TV) { canvases.forEach(([cv, ax]) => drawView(cv, ax, s)); if (!VIEW_TV) renderReadout(s); else renderTV(s); }
@@ -766,22 +1093,124 @@ function frame() {
 }
 
 // =========================================================================================== try links
-function applyTry(hp) {
+// A "Try it" link (#try=spring&k=300&b=2&xd=here&rpy=0,90,0) sets up the Play tab. Every value is checked first:
+// a plain number inside the slider's range (k 0-800 N/m, b 0-10 N s/m, fmax 0.5-4 N, roll/pitch/yaw ±180°,
+// x_d ±300 mm), and an equation the device would accept. A link without rpy means "not rotated" (0,0,0).
+// xd=here means "at the cursor", read when the link actually loads, and only if the device is calibrated.
+const TRY_WAIT_MS = 60000;                         // a link waits this long for "Take control"
+const TRY_NUM = { k: [0, 800], b: [0, 10], fmax: [0.5, 4] };
+const NUMBER_RE = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
+function parseTry(hp) {
   const preset = hp.get("try");
-  if (!PRESETS[preset]) { showTab("play"); return; }
-  P.preset = preset;
-  if (hp.has("k")) P.k = clamp(+hp.get("k") || 0, 0, 800);
-  if (hp.has("b")) P.b = clamp(+hp.get("b") || 0, 0, 10);
-  if (hp.has("rpy")) P.rpy = hp.get("rpy").split(",").map(v => +v || 0).concat([0, 0, 0]).slice(0, 3);
-  if (hp.get("xd") === "here" && app.S && app.S.x) P.xd = app.S.x.slice();
-  else if (hp.has("xd")) P.xd = hp.get("xd").split(",").map(v => (+v || 0) / 1000).concat([0, 0, 0]).slice(0, 3);
-  ["fx", "fy", "fz"].forEach(a => { if (hp.has(a)) P[a] = hp.get(a); });
+  if (!isPreset(preset)) return { err: `there is no behaviour called '${preset}'` };
+  const t = { preset };
+  const num = (name, text, lo, hi) => {
+    const v = NUMBER_RE.test(text.trim()) ? +text : NaN;
+    if (!Number.isFinite(v) || v < lo || v > hi) throw `${name} must be a number from ${lo} to ${hi} (the link says '${text}')`;
+    return v;
+  };
+  const three = (name, text, lo, hi) => {
+    const parts = text.split(",");
+    if (parts.length > 3) throw `${name} takes at most three numbers (the link says '${text}')`;
+    return parts.map(p => num(name, p, lo, hi)).concat([0, 0, 0]).slice(0, 3);
+  };
+  try {
+    Object.entries(TRY_NUM).forEach(([n, [lo, hi]]) => { if (hp.has(n)) t[n] = num(n, hp.get(n), lo, hi); });
+    t.rpy = hp.has("rpy") ? three("rpy (degrees)", hp.get("rpy"), -180, 180) : [0, 0, 0];
+    if (hp.has("xd")) t.xd = hp.get("xd") === "here" ? "here" : three("xd (mm)", hp.get("xd"), -300, 300).map(v => v / 1000);
+    ["fx", "fy", "fz"].forEach(a => {
+      if (!hp.has(a)) return;
+      const src = hp.get(a).trim() || "0", r = parseExpr(src);
+      if (r.err) throw `F${a[1]}: ${r.err}`;
+      t[a] = src;
+    });
+  } catch (e) { if (typeof e === "string") return { err: e }; throw e; }
+  return { t };
+}
+// The page settings a Try link asks for, as a copy (P itself changes only when the link really loads).
+function tryToP(t) {
+  const s = (live() ? app.S : app.sim && app.sim.state()) || {};
+  const next = JSON.parse(JSON.stringify(P));
+  next.preset = t.preset;
+  ["k", "b", "fmax", "fx", "fy", "fz"].forEach(n => { if (t[n] !== undefined) next[n] = t[n]; });
+  next.rpy = t.rpy.slice();
+  let note = "", herePending = false;
+  if (t.xd === "here") {
+    if (s.cal && vec3(s.x)) next.xd = s.x.map(v => clamp(v, -0.3, 0.3));
+    else {                                         // no position yet: the target moves to the cursor the moment
+      herePending = true;                          // the device reports a calibrated position (see onState)
+      note = " The device is not calibrated yet: as soon as it is, the target x_d moves to the cursor by itself.";
+    }
+  } else if (t.xd) next.xd = t.xd.slice();
+  return { next, label: PRESETS[t.preset].label, note, herePending };
+}
+// "xd=here" on an uncalibrated device: put the target at the cursor at the first calibrated state.
+function resolvePendingHere(s) {
+  if (!app.xdHerePending || !s || !s.cal || !vec3(s.x) || !inControl()) return;
+  app.xdHerePending = false;
+  P.xd = s.x.map(v => clamp(v, -0.3, 0.3));
+  pushParams();
+  toast("The device is calibrated: the target x_d is now at the cursor.", "good");
+}
+// Everything the force depends on. If a Try link or the Equation lab changes any of it while forces are on,
+// forces go off first: a new force law should never start under a hand that is not expecting it.
+const lawKey = p => JSON.stringify([p.preset, p.k, p.b, p.xd, p.rpy, p.preset === "custom" ? [p.fx, p.fy, p.fz] : 0]);
+async function loadNewLaw(next) {
+  const s = (live() ? app.S : app.sim && app.sim.state()) || {};
+  const changes = lawKey(next) !== lawKey(P);
+  let switchedOff = false;
+  if (s.on && changes) {
+    clearTimeout(sendTimer);
+    if (!(await send("forces 0"))) return { ok: false };
+    switchedOff = true;
+  }
+  Object.assign(P, next);
+  pushParams();
+  return { ok: true, switchedOff, unchangedOn: !!s.on && !changes };
+}
+async function applyTry(hp) {
   history.replaceState(null, "", "#tab=play");
   showTab("play");
-  if (!inControl()) app._pendingTry = true;           // loaded as soon as you take control
-  pushParams();
-  if (!inControl()) toast(`${PRESETS[preset].label} is ready. Press “Take control” (top right) and it loads on the device.`);
-  else toast(`Loaded: ${PRESETS[preset].label}. Switch forces on when you are holding the handle.`);
+  const r = parseTry(hp);
+  if (r.err) { toast("This Try-it link was not loaded: " + r.err + ".", "bad"); return; }
+  const label = PRESETS[r.t.preset].label;
+  if (!inControl()) {
+    if (viewOnly()) { toast(`This is a watch-only link, so “${label}” cannot be loaded on the device.`, "bad"); return; }
+    const c = (app.S && app.S.control) || {};
+    if (c.holder) { toast(`${c.holder} is driving the device right now, so “${label}” was not loaded. Ask them to release control, then click the link again.`, "bad"); return; }
+    app.pendingTry = { ...r.t, at: performance.now() };        // loaded when you press "Take control" (within a minute)
+    renderPendingTry();
+    toast(`${label} is ready. Press “Take control” (top right) within a minute and it loads on the device.`, "info", 4000);
+    return;
+  }
+  const { next, note, herePending } = tryToP(r.t);
+  const res = await loadNewLaw(next);
+  if (!res.ok) { toast("Forces could not be switched off first, so the Try-it link was not loaded.", "bad"); return; }
+  app.xdHerePending = herePending;
+  if (P.preset === "custom") syncEqInputs();
+  if (res.switchedOff) toast(`Loaded: ${label}. Forces were switched OFF because the force law changed: switch them on again when you are holding the handle.${note}`, "bad", 6000);
+  else if (res.unchangedOn) toast(`${label}: these settings are already running, forces stay on.`);
+  else toast(`Loaded: ${label}.${note} Switch forces on when you are holding the handle.`, note ? "bad" : "info", 4000);
+}
+// A waiting Try link is dropped after a minute, or as soon as someone else holds control.
+function checkPendingTry() {
+  const pt = app.pendingTry;
+  if (!pt || inControl()) return;
+  const c = (app.S && app.S.control) || {}, label = PRESETS[pt.preset].label;
+  if (c.holder) { app.pendingTry = null; toast(`“${label}” was not loaded: ${c.holder} is driving the device. Ask them to release control, then click the link again.`, "bad"); }
+  else if (performance.now() - pt.at > TRY_WAIT_MS) { app.pendingTry = null; toast(`“${label}” was not loaded within a minute, so it was dropped. Click the link again when you are ready.`, "bad"); }
+  if (!app.pendingTry) renderPendingTry();
+}
+function renderPendingTry() {
+  const box = $("#pending-try"), pt = app.pendingTry;
+  if (!pt) { if (box._pt) { box._pt = null; box.replaceChildren(); } return; }
+  if (box._pt !== pt) {                    // built once per link; only the seconds change, so the button stays clickable
+    box._pt = pt;
+    box.replaceChildren(status("info", `Ready to load: ${PRESETS[pt.preset].label}. `, h("span", {}, "Press “Take control” (top right) within ", h("b", { class: "secs" }), " s and it loads on the device. ",
+      h("button", { class: "btn small", type: "button", onclick: () => { app.pendingTry = null; renderPendingTry(); } }, "Forget it"))));
+  }
+  const b = box.querySelector(".secs");
+  if (b) b.textContent = String(Math.max(0, Math.ceil((TRY_WAIT_MS - (performance.now() - pt.at)) / 1000)));
 }
 
 // =========================================================================================== start tab
@@ -797,7 +1226,8 @@ function renderStartSteps() {
     { done: !!myName(), title: "Type your name (top right)", text: "Others see it while you are in control." },
     { done: !realDevice || s.connected, title: "Find the Haply", text: realDevice ? (s.released ? "The device is released to a terminal program. Press “Give the device back” in the Terminal tab." : s.connected ? `Inverse3 #${s.dev} is connected to the Pi.` : "Not found: check the blue USB cable on the Pi, then wait a few seconds.") : "Simulator: nothing to plug in." },
     { done: !realDevice || s.cal, title: "Calibrate it", text: "Look at the LED on the front. Purple = not calibrated. Rest the cursor on the magnetic dock until the LED changes colour, then lift it off. The position numbers in Play stop being 0." },
-    { done: inControl(), title: "Take control", text: live() ? (c.holder && !c.you ? `${c.holder} is driving now. Ask them to release, or just watch.` : "Press “Take control” at the top right. One person drives at a time; everyone can watch.") : "In the simulator you are always in control." },
+    { done: inControl(), title: "Take control", text: viewOnly() ? "This is a watch-only link: you can watch and press Stop forces, but not drive. Open the full lab link from your instructor to drive." :
+        live() ? (c.holder && !c.you ? `${c.holder} is driving now. Ask them to release, or just watch.` : "Press “Take control” at the top right. One person drives at a time; everyone can watch.") : "In the simulator you are always in control." },
     { done: moved, title: "Move the handle and watch the dot", text: realDevice ? "Open Play and move the handle slowly: the blue dot follows. The grid squares are 1 cm." : "Open Play and drag inside a view: the virtual hand pulls the dot." , action: ["Open Play", () => (location.hash = "tab=play")] },
     { done: !!(s.on && norm3(s.f || [0, 0, 0]) > 0.2), title: "Feel your first spring", text: (realDevice ? "Plug in the motor power cable (the handle may jump a little: hold it). " : "") + "Load a gentle spring at the cursor, then switch forces on and pull the handle 1–2 cm away.",
       action: ["Load a gentle spring here", () => (location.hash = "try=spring&k=150&b=2&xd=here")] },
@@ -816,6 +1246,8 @@ function renderModeBanner() {
     b.replaceChildren(status("bad", "This console needs the lab key. ", h("span", {}, "Paste it here: ", inp, " ", h("button", { class: "btn small", type: "button", onclick: () => { store.set("key", inp.value.trim()); location.reload(); } }, "Use key"))));
   } else if (!live()) {
     b.replaceChildren(status("info", "You are using the simulator. ", h("span", {}, "Everything works except the real device, the terminal and sending feedback to the instructor. Forces move a virtual hand that you drag with the mouse. In the lab, open the link with ", h("code", { text: "?key=…" }), " to drive the real Haply.")));
+  } else if (viewOnly()) {
+    b.replaceChildren(status("info", "This is a watch-only link. ", h("span", { text: "You see everything live, can read the code and the lessons, and can press Stop forces. Driving the device, recordings, the terminal and feedback need the full lab link from your instructor." })));
   } else b.replaceChildren();
   $("#mode-label").textContent = app.mode === "live" ? "live on " + (app.hello ? app.hello.host : "the lab Pi") : app.mode === "sim" ? "simulator" : "";
   $("#nav-foot").replaceChildren(h("a", { href: GITHUB, target: "_blank", rel: "noopener", text: "GitHub repository" }), h("br"), h("a", { href: PAGES, target: "_blank", rel: "noopener", text: "Public simulator" }));
@@ -823,17 +1255,21 @@ function renderModeBanner() {
 
 // =========================================================================================== experiment
 const PROTOCOLS = [
-  { id: "spring", title: "Measure the spring constant", try: "try=spring&k=200&b=1&xd=here", label: "spring-k200",
+  { id: "spring", title: "Measure the spring constant", try: "try=spring&k=200&b=1&xd=here&rpy=0,0,0", label: "spring-k200",
     steps: ["Load the spring at the cursor (button) and switch forces on.", "Start recording.", "Pull the handle slowly 1 cm to the right, hold 2 s; then 2 cm; then 3 cm. Let go back to the centre each time.", "Stop recording, press Analyse, choose e1 → f1."],
     q: "Is the slope close to 200 N/m? Why would it be a bit lower (hint: the force limit, your hand, the 1 s fade-in)?" },
   { id: "damping", title: "What does damping do?", try: "try=damping&b=4", label: "damping-b4",
     steps: ["Load the damping field and switch forces on.", "Record while you move the handle slowly, then quickly, left and right.", "Analyse VX → f1."],
     q: "The points should lie on a line through zero. What is its slope, and what sign does it have? Why?" },
-  { id: "wall", title: "Wall stiffness and buzz", try: "try=wall&k=300&b=0&xd=here", label: "wall-k300-b0",
+  { id: "wall", title: "Wall stiffness and buzz", try: "try=wall&k=300&b=0&xd=here&rpy=0,0,0", label: "wall-k300-b0",
     steps: ["Load the wall just below the cursor (move the target 1 cm down after loading).", "Record while you tap the wall lightly 5 times.", "Repeat with k = 800, b = 0, then k = 800, b = 3 (new recordings).", "Compare e3 and f3 over time."],
     q: "Which setting buzzes? What did damping change in the plot? (Lesson 6 explains why.)" },
   { id: "line", title: "Follow a line (virtual fixture)", try: "try=line&k=300&b=2&xd=here&rpy=0,90,0", label: "line-guide-on",
-    steps: ["Record 10 s tracing a straight line left-right with forces OFF.", "Load the line guide (pitch 90° turns the line to point along X), forces ON, record again.", "Analyse e2 and e3 (sideways error) in both."],
+    // Load the guide first, so both recordings measure e in the same frame and from the same x_d. With pitch 90°
+    // the free direction (the frame's z axis) is device X, so e3 is the motion along the line and e1, e2 are sideways.
+    steps: ["Load the line guide (button below; pitch 90° turns the line to point along X). Leave forces OFF and record 10 s tracing a straight line left-right.",
+      "Switch forces ON and record the same movement again.",
+      "Analyse both recordings: choose time t on the horizontal axis and look at e1, then e2 (the sideways error). e3 is the movement along the line, so it is large in both."],
     q: "By how much did the sideways error shrink with the guide? How would this help a surgeon trace an incision?" },
 ];
 function buildProtocols() {
@@ -873,8 +1309,15 @@ async function refreshRecordings() {
       h("td", {}, h("button", { class: "btn small primary", type: "button", onclick: () => analyse(r) }, "Analyse"), " ",
         h("button", { class: "btn small", type: "button", onclick: () => downloadRec(r) }, "CSV")))))));
 }
-async function recText(r) { return live() ? (await fetch(`api/recordings/${encodeURIComponent(r.name)}?key=${encodeURIComponent(KEY())}`)).text() : r.csv; }
+async function recText(r) {
+  if (!live()) return r.csv;
+  if (viewOnly()) throw new Error("a watch-only link can list the recordings but not open them");
+  const res = await fetch(`api/recordings/${encodeURIComponent(r.name)}?key=${encodeURIComponent(KEY())}`);
+  if (!res.ok) throw new Error(res.status === 403 ? "this needs the lab key" : "the server answered " + res.status);
+  return res.text();
+}
 async function downloadRec(r) {
+  if (viewOnly()) { toast("A watch-only link can list the recordings but not download them.", "bad"); return; }
   if (live()) { const a = h("a", { href: `api/recordings/${encodeURIComponent(r.name)}?key=${encodeURIComponent(KEY())}`, download: r.name }); document.body.append(a); a.click(); a.remove(); return; }
   const a = h("a", { href: URL.createObjectURL(new Blob([r.csv], { type: "text/csv" })), download: r.name }); document.body.append(a); a.click(); a.remove();
 }
@@ -1130,7 +1573,8 @@ const EXAMPLES = [
   { n: "Spring to the target (same as the Spring preset)", fx: "-kx*(x - xd) - bx*vx", fy: "-ky*(y - yd) - by*vy", fz: "-kz*(z - zd) - bz*vz" },
   { n: "Spring on X only (a rail along Y and Z)", fx: "-kx*(x - xd) - bx*vx", fy: "0", fz: "0" },
   { n: "Soft in X, stiff in Z (anisotropic)", fx: "-0.25*kx*(x - xd)", fy: "-0.25*ky*(y - yd)", fz: "-kz*(z - zd) - bz*vz" },
-  { n: "Floor at the target height (wall with step)", fx: "0", fy: "0", fz: "step(zd - z)*kz*(zd - z) - step(zd - z)*bz*vz" },
+  // max(0, ...) as in the Wall scenario: the damping term must never pull the hand back into the floor
+  { n: "Floor at the target height (wall with step)", fx: "0", fy: "0", fz: "max(0, kz*(zd - z) - bz*vz)*step(zd - z)" },
   { n: "Viscous field (honey)", fx: "-bx*vx", fy: "-by*vy", fz: "-bz*vz" },
   { n: "Magnet: pull grows near the target, capped at 1.5 N", fx: "clamp(-0.02*(x - xd)/((x-xd)^2 + (y-yd)^2 + 0.0004), -1.5, 1.5)", fy: "clamp(-0.02*(y - yd)/((x-xd)^2 + (y-yd)^2 + 0.0004), -1.5, 1.5)", fz: "-kz*(z - zd) - bz*vz" },
   { n: "Gentle 5 Hz vibration along Z (0.3 N)", fx: "0", fy: "0", fz: "0.3*sin(2*pi*5*t)" },
@@ -1143,13 +1587,20 @@ function initEqLab() {
   $("#btn-eq-feel").addEventListener("click", async () => {
     const r = eqParse(); if (!r.ok) { toast("Fix the equation errors first.", "bad"); return; }
     if (!inControl()) { toast("Take control first (top right).", "bad"); return; }
-    ["fx", "fy", "fz"].forEach(a => (P[a] = $("#eq-" + a).value.trim() || "0"));
-    P.preset = "custom"; if (!P.k) P.k = 200;
-    pushParams(); location.hash = "tab=play";
-    toast("Loaded as “My equation”. Switch forces on in Play when you are holding the handle.");
+    const next = JSON.parse(JSON.stringify(P));
+    ["fx", "fy", "fz"].forEach(a => (next[a] = exprText($("#eq-" + a).value)));
+    next.preset = "custom"; if (!next.k) next.k = 200;
+    const res = await loadNewLaw(next);                    // forces go off first if they are on and the law changes
+    if (!res.ok) { toast("Forces could not be switched off first, so the equations were not loaded.", "bad"); return; }
+    location.hash = "tab=play";
+    if (res.switchedOff) toast("Loaded as “My equation”. Forces were switched OFF because the force law changed: switch them on again in Play when you are holding the handle.", "bad", 6000);
+    else if (res.unchangedOn) toast("These equations are already running on the device.");
+    else toast("Loaded as “My equation”. Switch forces on in Play when you are holding the handle.", "info", 4000);
   });
   $("#btn-eq-propose").addEventListener("click", proposeEquation);
 }
+// After a Try link loads equations, the Equation lab shows them too (so "Load it on the device" starts from them).
+function syncEqInputs() { ["fx", "fy", "fz"].forEach(a => { const e = $("#eq-" + a); if (e) e.value = P[a]; }); eqUpdate(); }
 function eqParse() {
   const out = { ok: true, ast: {}, err: {} };
   ["fx", "fy", "fz"].forEach(a => { const src = $("#eq-" + a).value.trim() || "0"; const r = parseExpr(src); if (r.err) { out.ok = false; out.err[a] = r.err; } else out.ast[a] = r.ast; });
@@ -1159,6 +1610,8 @@ function eqUpdate() {
   if (!$("#eq-fx")) return;
   const r = eqParse();
   $("#eq-errors").replaceChildren(...Object.entries(r.err).map(([a, e]) => status("bad", `F${a[1]}: ${e}`)));
+  $("#btn-eq-feel").disabled = !r.ok;              // only equations the device will accept can be loaded
+  renderActiveExpr();
   if (!r.ok) return;
   $("#eq-latex").replaceChildren(tex(String.raw`\begin{aligned} F_x &= ${toTex(r.ast.fx)} \\ F_y &= ${toTex(r.ast.fy)} \\ F_z &= ${toTex(r.ast.fz)} \end{aligned}`));
   $("#eq-cpp").replaceChildren(codeBlock(
@@ -1170,6 +1623,34 @@ case Kind::MyBehaviour: {
                 ${toCpp(r.ast.fz)});
 }`));
   drawForceMap(r.ast); drawSweep(r.ast);
+}
+// The equations the engine reports as compiled and running (they can differ from this page's: an equation it
+// refused, or one still on its way), shown under the Play equation and in the Equation lab.
+let lastActiveKey = "";
+function renderActiveExpr() {
+  const s = app.S || {}, par = s.par || {};
+  const has = ["fx", "fy", "fz"].every(a => typeof par[a] === "string");
+  const mine = P.preset === "custom";
+  const same = a => exprNorm(par[a]) === exprNorm(exprText(P[a]));
+  // an error no longer matters once the engine runs what the page asks for
+  ["fx", "fy", "fz"].forEach(a => { if (has && mine && same(a)) delete app.exprError[a]; });
+  // The engine reports only its latest message, so "fx: ..." can be hidden by a "fy = ..." right after it. An equation
+  // this page sent more than 1.5 s ago that the engine still does not run was refused, message or not.
+  const late = has && mine && inControl() ? ["fx", "fy", "fz"].filter(a => !same(a) && !app.exprError[a] &&
+    app.exprSent[a] === exprText(P[a]) && performance.now() - (app.exprSentAt[a] || 0) > 1500) : [];
+  const errs = Object.values(app.exprError).concat(late.map(a => `F${a[1]} = ${exprText(P[a])} was not taken`));
+  const key = JSON.stringify([has, par.kind, par.fx, par.fy, par.fz, errs, mine, P.fx, P.fy, P.fz]);
+  if (key === lastActiveKey) return;
+  lastActiveKey = key;
+  const make = () => {
+    if (!has || (par.kind !== "custom" && !mine)) return [];
+    const rows = ["fx", "fy", "fz"].map(a => `F${a[1]} = ${par[a] || "0"}`).join(";   ");
+    const differs = mine && ["fx", "fy", "fz"].some(a => !same(a));
+    return [errs.length ? status("bad", `The device refused an equation (${errs.join("; ")}). It keeps running the ones below.`) : null,
+      h("p", { class: "note active-eq" + (differs ? " differs" : ""), text: (par.kind === "custom" ? "Running on the device now: " : "Stored on the device for “My equation”: ") + rows +
+        (differs && !errs.length ? "   (not yet the same as this page)" : "") })].filter(Boolean);
+  };
+  ["#eq-active-play", "#eq-active-lab"].forEach(sel => { const el = $(sel); if (el) el.replaceChildren(...make()); });
 }
 function eqScenario(ast) { return { kind: "custom", xd: P.xd, rpy: [0, 0, 0], k: [P.k, P.k, P.k], b: [P.b, P.b, P.b], ast }; }
 function drawForceMap(ast) {
@@ -1267,9 +1748,10 @@ let termStarted = false;
 function loadScript(src) { return new Promise((res, rej) => { const s = h("script", { src }); s.onload = res; s.onerror = rej; document.head.append(s); }); }
 async function initTerminal() {
   if (termStarted) return;
-  if (!live() || !app.hello || !app.hello.terminal) {
+  if (!live() || !app.hello || !app.hello.terminal || viewOnly()) {
     $("#term").classList.add("hidden");
-    $("#term-note").textContent = live() ? "The terminal service is not running on this computer." : "The terminal is only available on the lab console (the link with ?key=…). On your own computer, use your own terminal and the Build it yourself tab.";
+    $("#term-note").textContent = viewOnly() ? "The terminal needs the full lab link from your instructor (this is a watch-only link)." :
+      live() ? "The terminal service is not running on this computer." : "The terminal is only available on the lab console (the link with ?key=…). On your own computer, use your own terminal and the Build it yourself tab.";
     return;
   }
   termStarted = true;
@@ -1294,6 +1776,7 @@ $("#btn-acquire").addEventListener("click", () => { if (!live()) return; api("en
 // =========================================================================================== feedback
 async function sendFeedback(item, quiet) {
   if (!live()) { if (!quiet) toast("Not in the lab: use “Also open it as a GitHub issue” in the Feedback tab.", "bad"); return false; }
+  if (viewOnly()) { if (!quiet) toast("A watch-only link cannot send feedback: use “Also open it as a GitHub issue” in the Feedback tab.", "bad"); return false; }
   try { await api("feedback", { ...item, page: currentTab }); if (!quiet) toast("Thanks — sent to the instructor.", "good"); return true; }
   catch (e) { toast(e.message, "bad"); return false; }
 }
@@ -1362,10 +1845,12 @@ function renderTV(s) {
   if (performance.now() - lastTv < 150) return; lastTv = performance.now();
   const c = s.control || {};
   $("#tv-title").textContent = PRESETS[P.preset] ? PRESETS[P.preset].label : "Haply lab";
-  $("#tv-who").textContent = c.holder ? `${c.holder} is driving · forces ${s.on ? "ON" : "off"}` : `nobody in control · forces ${s.on ? "ON" : "off"}`;
+  const forces = staleInfo() ? "forces: unknown (connection lost)" : `forces ${s.on ? "ON" : "off"}`;
+  $("#tv-who").textContent = c.holder ? `${c.holder} is driving · ${forces}` : `nobody in control · ${forces}`;
   const F = s.f || [0, 0, 0];
-  $("#tv-nums").innerHTML = s.cal ? `x = (${s.x.map(mm).join(", ")}) mm<br>|F| = ${fmt(norm3(F), 2)} N<br>${Math.round(s.hz || 0)} Hz` : "not calibrated";
-  $("#tv-url").textContent = live() ? `Join: ${location.origin}/?key=${KEY()}` : "";
+  $("#tv-nums").innerHTML = s.cal && vec3(s.x) ? `x = (${s.x.map(mm).join(", ")}) mm<br>|F| = ${fmt(norm3(F), 2)} N<br>${Math.round(s.hz || 0)} Hz` : "not calibrated";
+  // with the watch-only key (the normal case for the big screen) this link lets the room watch, not drive
+  $("#tv-url").textContent = live() ? `${viewOnly() ? "Watch" : "Join"}: ${location.origin}/?key=${KEY()}` : "";
 }
 
 // Browsers slow a background tab's timers down to about once per second, which would let the engine's
@@ -1374,6 +1859,17 @@ document.addEventListener("visibilitychange", () => {
   const s = app.S || {};
   if (document.hidden && live() && inControl() && s.on) { send("forces 0"); app._hiddenOff = true; }
   if (!document.hidden && app._hiddenOff) { app._hiddenOff = false; toast("Forces were switched off because this page was in the background. Switch them on again when you are holding the handle.", "bad"); }
+});
+// Closing (or leaving) the page while you drive: stop the forces and hand control back at once, instead of
+// waiting for the watchdog and the 3 s lease. keepalive lets these requests finish while the page goes away.
+window.addEventListener("pagehide", () => {
+  if (!live() || !inControl()) return;
+  const post = (path, body) => {
+    try { fetch(`api/${path}?client=${CLIENT}`, { method: "POST", keepalive: true, headers: { "X-Lab-Key": KEY(), "Content-Type": "application/json" },
+      body: JSON.stringify({ client: CLIENT, name: myName(), ...body }) }).catch(() => {}); } catch {}
+  };
+  if ((app.S || {}).on) post("stop", {});
+  post("control", { action: "release" });
 });
 
 // =========================================================================================== init

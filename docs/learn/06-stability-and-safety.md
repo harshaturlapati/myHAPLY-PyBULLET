@@ -44,30 +44,34 @@ Your grip helps too: a firm hand adds real damping.
 ## 2. Why forces fade in
 
 Imagine switching on a $k = 300$ N/m spring while your hand is 2 cm from the target. The equation asks for 6 N,
-capped to 2 N, and it would arrive within one millisecond: a kick. So the engine multiplies the force by a
-**ramp** that grows from 0 to 1 over 1 s:
+capped to 2 N, and it would arrive within one millisecond: a kick. So the engine first caps the force at `fmax`,
+then multiplies it by a **ramp** that grows from 0 to 1 over 1 s:
 
 $$
-\mathbf{F} = r\,\mathbf{F}_{\text{eq}}, \qquad r \leftarrow \min\left(1,\ r + \frac{T}{1\ \text{s}}\right)
+\mathbf{F} = r\,\operatorname{cap}\left(\mathbf{F}_{\text{eq}}\right), \qquad
+\operatorname{cap}(\mathbf{F}) = \mathbf{F}\,\min\left(1,\ \frac{f_{\max}}{\lVert \mathbf{F} \rVert}\right), \qquad
+r \leftarrow \min\left(1,\ r + \frac{T}{1\ \text{s}}\right)
 $$
 
-Each cycle adds $0.001$, so after 1000 cycles (1 s) you have the full force. The ramp restarts from 0 when you switch
-forces on, change the scenario, or change a custom equation. In `lab/engine/haply_lab_engine.cpp`:
+Each cycle adds $0.001$, so after 1000 cycles (1 s) you have the full force. The order matters: capping first means
+the force grows smoothly from 0 to at most `fmax` over the whole second, however large $\mathbf{F}_{\text{eq}}$ is.
+(The other way round, $r\,\mathbf{F}_{\text{eq}}$ with 6 N asked would hit the 2 N cap after a third of a second.)
+The ramp restarts from 0 when you switch forces on, change the scenario, change a custom equation, or make one big
+jump in $k$ or $b$ (more than 100 N/m or 3 N·s/m at once, such as switching from "Damping field" to "Spring");
+dragging a slider changes them in small steps and does not restart it. In `lab/engine/haply_lab_engine.cpp`:
 
 ```cpp
-        if (forces_) {
             ramp_ = std::min(1.0, ramp_ + dt / RAMP_TIME);
-            F = ramp_ * F_eq;
+            F = F_eq;
             if (!F.allFinite()) F.setZero();
             const double n = F.norm();
-            if (n > fmax_) F *= fmax_ / n;
-        } else {
-            ramp_ = 0.0;
-        }
+            if (n > fmax_) F *= fmax_ / n;    // first cap the size (the direction stays the same) ...
+            F *= ramp_;                       // ... then fade in: full force only after RAMP_TIME, however large F_eq
 ```
 
 The same block also throws away a force that is not a finite number, and caps $\lVert \mathbf{F} \rVert$ at `fmax`
-by scaling the whole vector (so its direction is kept).
+by scaling the whole vector (so its direction is kept). `fmax` itself may drop at once but rises by at most 2 N per
+second, so dragging the force-limit slider up never steps the force either.
 
 ## 3. The limits, in one place
 
@@ -109,7 +113,7 @@ constexpr double HB_TIMEOUT = 1.0;      // s
 ```
 
 ```cpp
-                haply_.F_max = (float)FMAX_HARD;   // the engine's own clamp (fmax <= 4 N) is the one that counts
+        haply_.F_max = (float)FMAX_HARD;   // the engine's own clamp (fmax <= 4 N) is the one that counts
 ```
 
 10. **Lost device.** After more than 50 failed exchanges in a row the engine drops the connection, switches forces off and

@@ -11,9 +11,14 @@
 //           min max atan2 pow                                           (two arguments)
 //           clamp(value, lo, hi)                                        (three arguments)
 // step(a) is 1 when a > 0, else 0: handy for one-sided forces such as walls.
+// clamp(v, lo, hi) is min(max(v, lo), hi), so if lo > hi by mistake the result is always hi.
+// Numbers are plain decimals: 12  1.5  1.  .5  2e-3  (no hex such as 0x10, no "inf" or "nan").
 // The expression is compiled once into a short stack program, so evaluating it inside the 1 kHz loop
 // costs well under a microsecond and never allocates memory. The same grammar is implemented in
-// docs/app.js so the web page can check and preview an equation before it is sent to the device.
+// docs/app.js so the web page can check and preview an equation before it is sent to the device:
+// same numbers, names, error messages and the same 32-slot stack limit. Evaluation follows JavaScript
+// too: if any input of min, max, clamp, sign, pow or ^ is NaN ("not a number"), the result is NaN, which
+// the lab engine turns into zero force.
 #pragma once
 
 #include <cctype>
@@ -75,7 +80,7 @@ public:
                 case SUB: sp--; st[sp - 1] -= st[sp]; break;
                 case MUL: sp--; st[sp - 1] *= st[sp]; break;
                 case DIV: sp--; st[sp - 1] /= st[sp]; break;
-                case POW: sp--; st[sp - 1] = std::pow(st[sp - 1], st[sp]); break;
+                case POW: sp--; st[sp - 1] = pow_js(st[sp - 1], st[sp]); break;
                 case FN1: st[sp - 1] = fn1(o.arg, st[sp - 1]); break;
                 case FN2: sp--; st[sp - 1] = fn2(o.arg, st[sp - 1], st[sp]); break;
                 case FN3: sp -= 2; st[sp - 1] = clamp3(st[sp - 1], st[sp], st[sp + 1]); break;
@@ -101,24 +106,34 @@ private:
         }
     };
 
+    // The small functions below behave like JavaScript's Math.min, Math.max, Math.sign and Math.pow, so the
+    // device and the page's preview give the same answer even for NaN. (C++'s own a < b ? a : b would quietly
+    // return b when a is NaN.)
+    static double min_js(double a, double b) { return (std::isnan(a) || std::isnan(b)) ? NAN : (a < b ? a : b); }
+    static double max_js(double a, double b) { return (std::isnan(a) || std::isnan(b)) ? NAN : (a > b ? a : b); }
+    static double pow_js(double a, double b) {
+        // C++ says pow(1, NaN) = 1 and pow(-1, inf) = 1; JavaScript says NaN for both
+        if (std::isnan(b) || (std::isinf(b) && std::fabs(a) == 1.0)) return NAN;
+        return std::pow(a, b);
+    }
     static double fn1(int f, double a) {
         switch (f) {
             case 0: return std::sin(a);   case 1: return std::cos(a);   case 2: return std::tan(a);
             case 3: return std::asin(a);  case 4: return std::acos(a);  case 5: return std::atan(a);
             case 6: return std::exp(a);   case 7: return std::log(a);   case 8: return std::sqrt(a);
-            case 9: return std::fabs(a);  case 10: return (a > 0) - (a < 0);
+            case 9: return std::fabs(a);  case 10: return std::isnan(a) ? a : (double)((a > 0) - (a < 0));
             case 11: return a > 0 ? 1.0 : 0.0;  case 12: return std::floor(a);
         }
         return 0.0;
     }
     static double fn2(int f, double a, double b) {
         switch (f) {
-            case 0: return a < b ? a : b;  case 1: return a > b ? a : b;
-            case 2: return std::atan2(a, b);  case 3: return std::pow(a, b);
+            case 0: return min_js(a, b);  case 1: return max_js(a, b);
+            case 2: return std::atan2(a, b);  case 3: return pow_js(a, b);
         }
         return 0.0;
     }
-    static double clamp3(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
+    static double clamp3(double v, double lo, double hi) { return min_js(max_js(v, lo), hi); }   // lo > hi gives hi
 
     struct Parser {
         const std::string& s;
@@ -126,7 +141,8 @@ private:
         std::vector<Op>& out;
         std::string err;
 
-        void skip() { while (pos < s.size() && std::isspace((unsigned char)s[pos])) pos++; }
+        void skip() { while (pos < s.size() && std::isspace((unsigned char)s[pos])) pos++; }   // " \t\n\v\f\r"
+        bool digit_at(size_t i) const { return i < s.size() && s[i] >= '0' && s[i] <= '9'; }
         bool eat(char c) { skip(); if (pos < s.size() && s[pos] == c) { pos++; return true; } return false; }
         bool fail(const std::string& m) { if (err.empty()) err = m + " at position " + std::to_string(pos + 1); return false; }
 
@@ -161,12 +177,19 @@ private:
             if (pos >= s.size()) return fail("equation ends too early");
             const char c = s[pos];
             if (c == '(') { pos++; if (!expr()) return false; if (!eat(')')) return fail("missing ')'"); return true; }
-            if (std::isdigit((unsigned char)c) || c == '.') {
-                const char* b = s.c_str() + pos;
-                char* e = nullptr;
-                const double v = std::strtod(b, &e);
-                if (e == b) return fail("bad number");
-                pos += (size_t)(e - b);
+            if (std::isdigit((unsigned char)c) || (c == '.' && digit_at(pos + 1))) {
+                // digits [. digits]  or  . digits,  then an optional exponent e[+-]digits
+                // (scanned by hand: strtod alone would also accept hex such as 0x10, which the page rejects)
+                size_t e = pos;
+                while (digit_at(e)) e++;
+                if (e < s.size() && s[e] == '.') { e++; while (digit_at(e)) e++; }
+                if (e < s.size() && (s[e] == 'e' || s[e] == 'E')) {
+                    size_t x = e + 1;
+                    if (x < s.size() && (s[x] == '+' || s[x] == '-')) x++;
+                    if (digit_at(x)) { while (digit_at(x)) x++; e = x; }   // "2e" without digits: the number is 2
+                }
+                const double v = std::strtod(s.substr(pos, e - pos).c_str(), nullptr);
+                pos = e;
                 out.push_back({PUSH_NUM, 0, v});
                 return true;
             }

@@ -1,6 +1,14 @@
-// mySERIAL.h - small blocking serial port for Windows (COMn) and Linux/macOS (/dev/ttyACMn, /dev/haply).
+// mySERIAL.h - small serial port for Windows (COMn) and Linux/macOS (/dev/ttyACMn, /dev/haply).
 // The Haply Inverse3 is a USB CDC-ACM device (Teensy, USB id 16c0:0483): the baud rate is nominal; what
 // matters is raw 8-bit mode, no flow control, and reads that return as soon as data arrives.
+//
+// Two rules that keep a force-feedback device safe:
+//   * ONE program at a time. Two programs writing force commands to the same port would take turns
+//     driving the arm, and each would read the other's replies. Windows refuses a second open by itself;
+//     on Linux/macOS open() takes an exclusive lock (flock + TIOCEXCL), so a second program gets
+//     "port in use by another program" instead of the device.
+//   * NO call waits forever. Reads and writes give up after a timeout and report an error, so a stalled
+//     device can never freeze the program that is supposed to switch its force off.
 #pragma once
 
 #include <chrono>
@@ -27,6 +35,7 @@
   #include <errno.h>
   #include <fcntl.h>
   #include <poll.h>
+  #include <sys/file.h>
   #include <sys/ioctl.h>
   #include <sys/stat.h>
   #include <termios.h>
@@ -44,6 +53,9 @@ public:
     SerialPort(const SerialPort&) = delete;
     SerialPort& operator=(const SerialPort&) = delete;
 
+    // Longest time write_all() may wait for the device to take the bytes (a healthy write takes microseconds).
+    static constexpr int WRITE_TIMEOUT_MS = 100;
+
     // port: "COM5" on Windows; "/dev/haply", "/dev/ttyACM0" or "/dev/cu.usbmodemXXXX" elsewhere.
     bool open(const std::string& port) {
         close();
@@ -51,6 +63,7 @@ public:
 #if defined(_WIN32)
         std::string path = port;
         if (path.rfind("\\\\.\\", 0) != 0) path = "\\\\.\\" + path;   // required for COM10 and above
+        // share mode 0 = exclusive: while we hold the port, every other open() fails with "access denied"
         h_ = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
         if (h_ == INVALID_HANDLE_VALUE) { set_error("open"); return false; }
         DCB dcb{};
@@ -77,14 +90,29 @@ public:
         t.ReadIntervalTimeout = MAXDWORD;
         t.ReadTotalTimeoutMultiplier = MAXDWORD;
         t.ReadTotalTimeoutConstant = 20;
-        t.WriteTotalTimeoutConstant = 100;
+        t.WriteTotalTimeoutConstant = WRITE_TIMEOUT_MS;
         SetCommTimeouts(h_, &t);
         current_timeout_ms_ = 20;
         PurgeComm(h_, PURGE_RXCLEAR | PURGE_TXCLEAR);
         return true;
 #else
-        fd_ = ::open(port.c_str(), O_RDWR | O_NOCTTY | O_CLOEXEC);
-        if (fd_ < 0) { set_error("open"); return false; }
+        // O_NONBLOCK: read() and write() never sleep; read_exact() and write_all() wait with poll() and a deadline.
+        fd_ = ::open(port.c_str(), O_RDWR | O_NOCTTY | O_CLOEXEC | O_NONBLOCK);
+        if (fd_ < 0) {
+            const bool busy = errno == EBUSY;   // another program holds it with TIOCEXCL
+            set_error("open");
+            if (busy) error_ += " (port in use by another program; in the lab: press 'Release device' first)";
+            return false;
+        }
+        // Linux happily opens a tty twice, so ask for it alone. flock() fails if another program that uses this
+        // class holds the port; TIOCEXCL then makes every later open() by a normal user fail with EBUSY.
+        if (flock(fd_, LOCK_EX | LOCK_NB) != 0) {
+            error_ = "port " + port + " is in use by another program (in the lab: press 'Release device' first)";
+            ::close(fd_);
+            fd_ = -1;
+            return false;
+        }
+        if (ioctl(fd_, TIOCEXCL) != 0) { set_error("TIOCEXCL"); close(); return false; }
         termios tio{};
         if (tcgetattr(fd_, &tio) != 0) { set_error("tcgetattr"); close(); return false; }
         cfmakeraw(&tio);
@@ -112,21 +140,38 @@ public:
 #if defined(_WIN32)
         if (h_ != INVALID_HANDLE_VALUE) { CloseHandle(h_); h_ = INVALID_HANDLE_VALUE; }
 #else
-        if (fd_ >= 0) { ::close(fd_); fd_ = -1; }
+        if (fd_ >= 0) {
+            ioctl(fd_, TIOCNXCL);   // give up the exclusive use; the flock goes away with close()
+            ::close(fd_);
+            fd_ = -1;
+        }
 #endif
     }
 
+    // Write all n bytes, or give up after WRITE_TIMEOUT_MS (a device that stopped taking data).
     bool write_all(const uint8_t* data, size_t n) {
 #if defined(_WIN32)
         DWORD written = 0;
-        if (!WriteFile(h_, data, (DWORD)n, &written, nullptr) || written != n) { set_error("write"); return false; }
+        if (!WriteFile(h_, data, (DWORD)n, &written, nullptr)) { set_error("write"); return false; }
+        if (written != n) { error_ = "write timeout"; return false; }   // WriteTotalTimeoutConstant expired
         return true;
 #else
         size_t done = 0;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(WRITE_TIMEOUT_MS);
         while (done < n) {
-            ssize_t w = ::write(fd_, data + done, n - done);
-            if (w < 0) { if (errno == EINTR || errno == EAGAIN) continue; set_error("write"); return false; }
-            done += (size_t)w;
+            const ssize_t w = ::write(fd_, data + done, n - done);
+            if (w > 0) { done += (size_t)w; continue; }
+            if (w < 0 && errno == EINTR) continue;
+            if (w < 0 && errno != EAGAIN && errno != EWOULDBLOCK) { set_error("write"); return false; }
+            // the output buffer is full: wait until the device takes more bytes, but not forever
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  deadline - std::chrono::steady_clock::now()).count();
+            if (left <= 0) { error_ = "write timeout"; return false; }
+            pollfd p{fd_, POLLOUT, 0};
+            const int pr = ::poll(&p, 1, (int)left);
+            if (pr == 0) { error_ = "write timeout"; return false; }
+            if (pr < 0) { if (errno == EINTR) continue; set_error("poll"); return false; }
+            if (p.revents & (POLLERR | POLLHUP | POLLNVAL)) { error_ = "device disconnected"; return false; }
         }
         return true;
 #endif

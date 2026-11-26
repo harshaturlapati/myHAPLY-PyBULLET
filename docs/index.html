@@ -16,10 +16,13 @@
 <header class="bar">
   <div class="brand">Haply lab console <small id="mode-label">connecting…</small></div>
   <div class="chips" id="chips" aria-live="polite"></div>
+  <!-- for everyone, the driver and every watcher, whenever forces are on (or the page has lost its connection) -->
+  <button class="btn danger stopbtn hidden" type="button" id="btn-stop">■ Stop forces</button>
   <div class="who">
     <input type="text" id="my-name" placeholder="Your name" maxlength="40" aria-label="Your name">
     <button class="btn small" type="button" id="control-btn">Take control</button>
   </div>
+  <div class="connbanner hidden" id="conn-banner" role="alert"></div>
 </header>
 
 <div class="shell">
@@ -75,6 +78,7 @@
             <h3>The equation running now</h3>
             <div class="eq" id="eq-general"></div>
             <div class="eqnums" id="eq-numbers"></div>
+            <div id="eq-active-play"></div>
           </div>
           <div class="card snippet">
             <h3>The C++ that computes it <span class="small muted">(libs/myHAPLY_SCENARIOS.h)</span></h3>
@@ -88,15 +92,16 @@
             <h3>1 · Behaviour</h3>
             <div class="presets" id="presets"></div>
             <p class="note" id="preset-help"></p>
+            <div id="pending-try"></div>
           </div>
           <div class="card">
             <h3>2 · Parameters</h3>
             <div id="sliders"></div>
             <div style="margin-top:10px"><b class="small">Target point x<sub>d</sub> (mm)</b></div>
             <div class="row">
-              <label class="field">x<input type="number" id="xd-x" step="1"></label>
-              <label class="field">y<input type="number" id="xd-y" step="1"></label>
-              <label class="field">z<input type="number" id="xd-z" step="1"></label>
+              <label class="field">x<input type="number" id="xd-x" step="1" min="-300" max="300"></label>
+              <label class="field">y<input type="number" id="xd-y" step="1" min="-300" max="300"></label>
+              <label class="field">z<input type="number" id="xd-z" step="1" min="-300" max="300"></label>
               <button class="btn small" type="button" id="btn-xd-here">Put the target at the cursor</button>
             </div>
           </div>
@@ -109,7 +114,8 @@
             <h3>Show it to the room</h3>
             <p class="note">Open the big-screen view on any screen, or put it on the lab TV.</p>
             <div class="row"><a class="btn small" id="lnk-tv" target="_blank" rel="noopener">Open big-screen view</a>
-              <button class="btn small" type="button" id="btn-tv">Show on the lab TV</button></div>
+              <button class="btn small" type="button" id="btn-tv">Show on the lab TV</button>
+              <button class="btn small hidden" type="button" id="btn-viewlink" title="Anyone with this link can watch and press Stop forces, but not drive">Copy a watch-only link</button></div>
           </div>
         </div>
       </div>
@@ -199,15 +205,16 @@
           <div class="card">
             <h3>Your equations</h3>
             <label class="field">Start from an example<select id="eq-examples"></select></label>
-            <label class="field mono">F<sub>x</sub> =<input type="text" id="eq-fx" spellcheck="false" class="mono"></label>
-            <label class="field mono">F<sub>y</sub> =<input type="text" id="eq-fy" spellcheck="false" class="mono"></label>
-            <label class="field mono">F<sub>z</sub> =<input type="text" id="eq-fz" spellcheck="false" class="mono"></label>
+            <label class="field mono">F<sub>x</sub> =<input type="text" id="eq-fx" spellcheck="false" class="mono" maxlength="240"></label>
+            <label class="field mono">F<sub>y</sub> =<input type="text" id="eq-fy" spellcheck="false" class="mono" maxlength="240"></label>
+            <label class="field mono">F<sub>z</sub> =<input type="text" id="eq-fz" spellcheck="false" class="mono" maxlength="240"></label>
             <div id="eq-errors"></div>
             <p class="note">Variables: <code>x y z</code> (m), <code>vx vy vz</code> (m/s), <code>t</code> (s), the target <code>xd yd zd</code> and the slider values <code>kx ky kz</code> (N/m), <code>bx by bz</code> (N·s/m). Functions: <code>sin cos tan exp log sqrt abs sign step floor min max pow atan2 clamp</code>; <code>step(a)</code> is 1 when a &gt; 0.</p>
             <div class="row">
               <button class="btn primary" type="button" id="btn-eq-feel">Load it on the device</button>
               <button class="btn" type="button" id="btn-eq-propose">Propose it as a new behaviour</button>
             </div>
+            <div id="eq-active-lab"></div>
           </div>
           <div class="card"><h3>As mathematics</h3><div class="eq" id="eq-latex"></div></div>
           <div class="card"><h3>As C++ with Eigen</h3><div id="eq-cpp"></div></div>
@@ -257,7 +264,7 @@
         <button class="btn" type="button" id="btn-acquire">Give the device back to the console</button>
         <span class="small muted">Insert:</span>
         <button class="btn small" type="button" data-term="cd ~/myHAPLY-PyBULLET && git pull">git pull</button>
-        <button class="btn small" type="button" data-term="cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j3">build</button>
+        <button class="btn small" type="button" data-term="cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j2">build</button>
         <button class="btn small" type="button" data-term="./build/100-Haply-basics_01_read_fbk --seconds 10">run 01_read_fbk</button>
       </div>
       <div id="term"></div>
